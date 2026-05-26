@@ -2,7 +2,7 @@ const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const GEMINI_MODEL = "gemini-2.0-flash";
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -98,7 +98,7 @@ async function askGemini({ res, apiKey, messages, system, maxTokens }) {
       reply: createPlaceholderReply(messages, system),
       provider: "placeholder",
       providerError: data.error?.message || "Gemini request failed.",
-      });
+    });
   }
 
   const reply = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
