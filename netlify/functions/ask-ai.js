@@ -181,6 +181,9 @@ function createPlaceholderReply(messages, system) {
   }
 
   if (lowerSystem.includes("main ai assistant")) {
+    if (lowerMessage.includes("calendar") || lowerMessage.includes("appointment") || lowerMessage.includes("therapy")) {
+      return 'Done — I added it to your calendar and timeline.\n\n```action\n{"type":"add_calendar","data":{"date":"29","title":"Therapy Session","type":"appointment"}}\n```\n```action\n{"type":"add_schedule","data":{"time":"1:00 PM","event":"Therapy Session","type":"routine"}}\n```';
+    }
     if (lowerMessage.includes("water")) {
       return 'Test main assistant: I would log a water glass when the real AI action parser is connected.\n\n```action\n{"type":"add_water","data":{"amount":1}}\n```';
     }
@@ -190,5 +193,5 @@ function createPlaceholderReply(messages, system) {
     return "Test main assistant: I can chat and show how this will feel, but smart custom actions work best with a real AI key. Try asking me to add water or log an appointment.";
   }
 
-  return "Test AI reply: The chat is connected. Add a real AI API key later to replace this placeholder with smarter answers.";
+return "Test AI reply: The chat is connected. Add a real AI API key later to replace this placeholder with smarter answers.";
 }
