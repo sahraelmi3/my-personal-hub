@@ -93,7 +93,7 @@ const WORK_AI = `You are the user's call center coach. They book home improvemen
 const HEALTH_AI = `You are the user's wellness coach. Be warm, specific (2-4 sentences). Suggest quick desk stretches, hydration, energy management, easy meals. Never give medical advice — refer to their doctor.`;
 const NOTES_AI = `You are the user's note-taking assistant. Help organize thoughts, brainstorm, summarize. Warm and concise (2-4 sentences).`;
 const MASTER_AI = `You are the user's main AI assistant with power to make changes in their app.
-You can perform actions by including a JSON block:
+You can perform actions by including action blocks. The app will hide these blocks from the user and run them.
 - add_note: {"title": "...", "emoji": "...", "color": "pink|mint|lavender|sky|cream|peach", "content": "..."}
 - add_budget: {"category": "income|expense|bills|debt|saving", "name": "...", "planned": 0, "actual": 0} where planned means needed/expected/goal and actual means spent/received/paid/saved
 - add_schedule: {"time": "8:00 AM", "event": "...", "type": "work|break|routine|finish"}
@@ -107,7 +107,7 @@ Format:
 \`\`\`action
 {"type": "add_note", "data": {"title": "...", ...}}
 \`\`\`
-Keep responses 2-4 sentences.`;
+For multiple actions, include multiple action blocks. Do not use \`\`\`json for app actions. Keep the visible response 1-2 friendly sentences and never describe the hidden JSON.`;
 const LISTENING_SYSTEM = `You are an AI sales coach listening live. Script flow: Intro → Qualify → Needs → Commit → Value of Visit → Close → Button-Up.
 Respond ONLY in JSON: {"status": "on_track" | "off_track" | "objection" | "buying_signal", "stage": "intro|qualify|needs|transition|vov|close|buttonup|unknown", "tip": "ONE specific sentence to say next", "alert": "brief alert if needed"}
 Keep tips under 20 words.`;
@@ -675,18 +675,41 @@ export default function App() {
     setMasterLoading(true);
     try {
       const reply = await askClaude(updatedChat, MASTER_AI, 1000);
-      const actionMatch = reply.match(/```action\s*([\s\S]*?)```/);
-      const cleanReply = reply.replace(/```action\s*[\s\S]*?```/g, "").trim();
-      setMasterChat([...updatedChat, { role: "assistant", content: cleanReply }]);
-      if (actionMatch) {
-        try { executeAction(JSON.parse(actionMatch[1].trim())); }
-        catch (e) { console.error("Action parse error:", e); }
-      }
+      const { cleanReply, actions } = parseAIActionResponse(reply);
+      setMasterChat([...updatedChat, { role: "assistant", content: cleanReply || "Done — I updated that for you." }]);
+      actions.forEach(action => executeAction(action));
     } catch (e) {
       setMasterChat([...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. The built-in test coach should work without a key, so check that netlify/functions/ask-ai.js was uploaded and redeployed." }]);
     }
     setMasterLoading(false);
   };
+
+  const parseAIActionResponse = (reply) => {
+    const actions = [];
+    let cleanReply = reply || "";
+    const blockRegex = /```(?:action|json)\s*([\s\S]*?)```/gi;
+    let match;
+    while ((match = blockRegex.exec(reply || "")) !== null) {
+      const parsedActions = parseActionPayload(match[1]);
+      actions.push(...parsedActions);
+    }
+    cleanReply = cleanReply.replace(blockRegex, "").trim();
+    return { cleanReply, actions };
+  };
+
+  const parseActionPayload = (payload) => {
+    try {
+      const parsed = JSON.parse(payload.trim());
+      if (Array.isArray(parsed)) return parsed.filter(isValidAction);
+      if (isValidAction(parsed)) return [parsed];
+      return [];
+    } catch (error) {
+      console.error("Action parse error:", error);
+      return [];
+    }
+  };
+
+  const isValidAction = (action) => action && typeof action.type === "string" && action.data && typeof action.data === "object";
 
   const executeAction = (action) => {
     const colorMap = { pink: palette.pink, mint: palette.mint, lavender: palette.lavender, sky: palette.sky, cream: palette.cream, peach: palette.peach };
@@ -701,7 +724,7 @@ export default function App() {
       case "add_budget": {
         const cat = action.data.category;
         if (budget[cat]) {
-          setBudget(p => ({ ...p, [cat]: [...p[cat], { id: Date.now(), category: action.data.name, planned: parseFloat(action.data.planned) || 0, actual: parseFloat(action.data.actual) || 0, paid: false }] }));
+          setBudget(p => ({ ...p, [cat]: [...p[cat], { id: Date.now(), category: action.data.name, planned: parseFloat(action.data.planned) || 0, actual: parseFloat(action.data.actual) || 0, dueDate: action.data.dueDate || "", paid: false }] }));
           actionMsg = `💰 Added "${action.data.name}" to ${cat}`;
         }
         break;
@@ -714,7 +737,8 @@ export default function App() {
         let color = palette.mint;
         if (action.data.type === "social") color = palette.lavender;
         if (action.data.type === "appointment") color = palette.pink;
-        setCalendarEvents(p => [...p, { id: Date.now(), date: action.data.date, title: action.data.title, type: action.data.type, color }]);
+        const date = String(action.data.date || "").replace(/\D/g, "");
+        setCalendarEvents(p => [...p, { id: Date.now(), date, title: action.data.title, type: action.data.type, color }]);
         actionMsg = `🗓️ Added "${action.data.title}" on May ${action.data.date}`;
         break;
       }
@@ -2185,4 +2209,3 @@ export default function App() {
     </div>
   );
 }
-
