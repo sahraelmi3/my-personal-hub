@@ -22,11 +22,12 @@ const FIREBASE_ENABLED = true;
 
 let firebaseAppPromise = null;
 let firestorePromise = null;
+let firebaseAuthPromise = null;
 
 const getCloudDocId = (fallbackUserId) => {
   try {
     const current = JSON.parse(localStorage.getItem("app_current_user") || "null");
-    return (current?.email || fallbackUserId).toLowerCase().replace(/\//g, "_");
+    return String(current?.id || fallbackUserId).replace(/\//g, "_");
   } catch {
     return fallbackUserId;
   }
@@ -46,6 +47,41 @@ const getFirestoreDb = async () => {
   }
   return firestorePromise;
 };
+
+const getFirebaseAuth = async () => {
+  if (!FIREBASE_ENABLED) return null;
+  if (!firebaseAppPromise) {
+    firebaseAppPromise = import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js")
+      .then(({ initializeApp, getApps }) => getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG));
+  }
+  if (!firebaseAuthPromise) {
+    firebaseAuthPromise = Promise.all([
+      firebaseAppPromise,
+      import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js")
+    ]).then(([app, auth]) => auth.getAuth(app));
+  }
+  return firebaseAuthPromise;
+};
+
+const getFirebaseAuthModule = () =>
+  import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js");
+
+const firebaseAuthMessage = (error) => {
+  const code = error?.code || "";
+  if (code.includes("operation-not-allowed")) return "Turn on Email/Password sign-in in Firebase Authentication > Sign-in method.";
+  if (code.includes("email-already-in-use")) return "That email already has an account. Try logging in.";
+  if (code.includes("invalid-email")) return "That email address does not look right.";
+  if (code.includes("weak-password")) return "Firebase needs a password with at least 6 characters.";
+  if (code.includes("invalid-credential") || code.includes("wrong-password") || code.includes("user-not-found")) return "Wrong email or password.";
+  if (code.includes("network-request-failed")) return "Firebase could not connect. Check your internet and try again.";
+  return error?.message || "Firebase sign-in failed.";
+};
+
+const sessionFromFirebaseUser = (firebaseUser, fallbackName = "") => ({
+  id: firebaseUser.uid,
+  email: firebaseUser.email || "",
+  displayName: firebaseUser.displayName || fallbackName || firebaseUser.email?.split("@")[0] || "Friend",
+});
 
 const saveCloudData = async (userId, key, data) => {
   try {
@@ -123,6 +159,23 @@ const loadLocal = (userId, key, fallback) => {
     const v = localStorage.getItem(lsKey(userId, key));
     return v ? JSON.parse(v) : fallback;
   } catch { return fallback; }
+};
+
+const APP_DATA_KEYS = [
+  "schedule", "calendar", "budget", "notes", "objections", "inboundScript", "outboundScript",
+  "meds", "stars", "appointments", "callStreak", "callLog", "water", "reminders",
+  "notifEnabled", "completedTasks", "routineDate"
+];
+
+const migrateLocalUserData = (fromUserId, toUserId) => {
+  if (!fromUserId || !toUserId || fromUserId === toUserId) return;
+  APP_DATA_KEYS.forEach((key) => {
+    try {
+      const oldValue = localStorage.getItem(lsKey(fromUserId, key));
+      const newKey = lsKey(toUserId, key);
+      if (oldValue && !localStorage.getItem(newKey)) localStorage.setItem(newKey, oldValue);
+    } catch {}
+  });
 };
 
 // â”€â”€â”€ AUTH STORAGE (works without Firebase using localStorage) â”€â”€â”€â”€â”€â”€â”€
@@ -274,16 +327,64 @@ export default function App() {
 
   // Check for existing session on load
   useEffect(() => {
+    let unsubscribe = null;
+    let cancelled = false;
     const existing = getCurrentUser();
     if (existing) setUser(existing);
+
+    if (FIREBASE_ENABLED) {
+      Promise.all([getFirebaseAuth(), getFirebaseAuthModule()])
+        .then(([auth, authModule]) => {
+          if (!auth || cancelled) return;
+          unsubscribe = authModule.onAuthStateChanged(auth, (firebaseUser) => {
+            if (cancelled) return;
+            if (firebaseUser) {
+              const sessionUser = sessionFromFirebaseUser(firebaseUser);
+              setCurrentUser(sessionUser);
+              setUser(sessionUser);
+            } else if (!getCurrentUser()) {
+              setUser(null);
+            }
+          });
+        })
+        .catch(error => console.warn("Firebase auth session skipped:", error.message));
+    }
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     setAuthError("");
-    const { email, password, displayName } = authForm;
+    const email = authForm.email.trim().toLowerCase();
+    const { password, displayName } = authForm;
     if (!email || !password || !displayName) { setAuthError("Fill all fields!"); return; }
-    if (password.length < 4) { setAuthError("Password must be at least 4 characters"); return; }
+    if (password.length < 6) { setAuthError("Password must be at least 6 characters"); return; }
     setAuthLoading(true);
+
+    if (FIREBASE_ENABLED) {
+      try {
+        const [auth, authModule] = await Promise.all([getFirebaseAuth(), getFirebaseAuthModule()]);
+        const credential = await authModule.createUserWithEmailAndPassword(auth, email, password);
+        await authModule.updateProfile(credential.user, { displayName });
+        const sessionUser = sessionFromFirebaseUser(credential.user, displayName);
+        setCurrentUser(sessionUser);
+        setUser(sessionUser);
+
+        const users = getStoredUsers();
+        users[email] = { id: sessionUser.id, email, displayName, password };
+        saveStoredUsers(users);
+        setAuthLoading(false);
+        return;
+      } catch (error) {
+        setAuthError(firebaseAuthMessage(error));
+        setAuthLoading(false);
+        return;
+      }
+    }
+
     const users = getStoredUsers();
     if (users[email]) { setAuthError("Account exists. Try logging in!"); setAuthLoading(false); return; }
     const newUser = { id: email.toLowerCase(), email, displayName, password }; // password stored locally for local fallback
@@ -295,11 +396,54 @@ export default function App() {
     setAuthLoading(false);
   };
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     setAuthError("");
-    const { email, password } = authForm;
+    const email = authForm.email.trim().toLowerCase();
+    const { password } = authForm;
     if (!email || !password) { setAuthError("Fill all fields!"); return; }
     setAuthLoading(true);
+
+    if (FIREBASE_ENABLED) {
+      try {
+        const [auth, authModule] = await Promise.all([getFirebaseAuth(), getFirebaseAuthModule()]);
+        const credential = await authModule.signInWithEmailAndPassword(auth, email, password);
+        const sessionUser = sessionFromFirebaseUser(credential.user);
+        const localUser = getStoredUsers()[email];
+        if (localUser) migrateLocalUserData(localUser.id, sessionUser.id);
+        setCurrentUser(sessionUser);
+        setUser(sessionUser);
+        setAuthLoading(false);
+        return;
+      } catch (error) {
+        const users = getStoredUsers();
+        const found = users[email];
+        if (found && found.password === password) {
+          try {
+            const [auth, authModule] = await Promise.all([getFirebaseAuth(), getFirebaseAuthModule()]);
+            const credential = await authModule.createUserWithEmailAndPassword(auth, email, password);
+            await authModule.updateProfile(credential.user, { displayName: found.displayName });
+            const sessionUser = sessionFromFirebaseUser(credential.user, found.displayName);
+            migrateLocalUserData(found.id, sessionUser.id);
+            setCurrentUser(sessionUser);
+            setUser(sessionUser);
+            setAuthLoading(false);
+            return;
+          } catch (migrationError) {
+            console.warn("Firebase account migration skipped:", migrationError.message);
+          }
+
+          const sessionUser = { id: found.id, email: found.email, displayName: found.displayName };
+          setCurrentUser(sessionUser);
+          setUser(sessionUser);
+          setAuthLoading(false);
+          return;
+        }
+        setAuthError(firebaseAuthMessage(error));
+        setAuthLoading(false);
+        return;
+      }
+    }
+
     const users = getStoredUsers();
     const found = users[email];
     if (!found || found.password !== password) { setAuthError("Wrong email or password"); setAuthLoading(false); return; }
@@ -310,6 +454,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (FIREBASE_ENABLED) {
+      getFirebaseAuth()
+        .then(auth => auth && getFirebaseAuthModule().then(({ signOut }) => signOut(auth)))
+        .catch(error => console.warn("Firebase sign-out skipped:", error.message));
+    }
     setCurrentUser(null);
     setUser(null);
     setUserDataReady(false);
@@ -2324,4 +2473,5 @@ export default function App() {
     </div>
   );
 }
+
 
