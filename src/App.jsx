@@ -31,20 +31,34 @@ const palette = {
 };
 
 async function askClaude(messages, systemPrompt, maxTokens = 1000) {
-  const response = await fetch("/.netlify/functions/ask-ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      maxTokens,
-      system: systemPrompt,
-      messages,
-    }),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || "AI request failed");
+  const payload = JSON.stringify({ maxTokens, system: systemPrompt, messages });
+  const endpoints = ["/api/ask-ai", "/.netlify/functions/ask-ai"];
+  let lastError = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      });
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        lastError = new Error(`${endpoint} did not return JSON`);
+        continue;
+      }
+      const data = await response.json();
+      if (!response.ok) {
+        lastError = new Error(data.error || "AI request failed");
+        continue;
+      }
+      return data.reply || "Sorry, I couldn't respond right now!";
+    } catch (error) {
+      lastError = error;
+    }
   }
-  return data.reply || "Sorry, I couldn't respond right now!";
+
+  throw lastError || new Error("AI request failed");
 }
 
 // ─── LOCAL STORAGE HELPERS (used until Firebase is connected) ──────
