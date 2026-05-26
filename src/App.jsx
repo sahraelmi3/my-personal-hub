@@ -11,7 +11,7 @@ import {
 // ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCX1vJYGoSdnOOJkqrXINowYRw_au3SijY",
+  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
   authDomain: "my-personal-hub-debb3.firebaseapp.com",
   projectId: "my-personal-hub-debb3",
   storageBucket: "my-personal-hub-debb3.firebasestorage.app",
@@ -210,7 +210,7 @@ const loadLocal = (userId, key, fallback) => {
 const APP_DATA_KEYS = [
   "schedule", "calendar", "budget", "notes", "objections", "inboundScript", "outboundScript",
   "meds", "stars", "appointments", "callStreak", "callLog", "water", "reminders",
-  "notifEnabled", "completedTasks", "routineDate"
+  "notifEnabled", "completedTasks", "routineDate", "routines"
 ];
 
 const migrateLocalUserData = (fromUserId, toUserId) => {
@@ -294,6 +294,7 @@ const getLocalDateKey = (date = new Date()) => {
 
 const timeToMinutes = (timeStr = "") => {
   const cleaned = String(timeStr).trim();
+  if (cleaned.toLowerCase() === "all day") return Number.MAX_SAFE_INTEGER - 1;
   const match = cleaned.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if (!match) return Number.MAX_SAFE_INTEGER;
   let hours = parseInt(match[1], 10);
@@ -311,6 +312,44 @@ const sortScheduleItems = (items) =>
     if (timeDiff !== 0) return timeDiff;
     return String(a.event || "").localeCompare(String(b.event || ""));
   });
+
+const TIME_OPTIONS = Array.from({ length: 24 * 12 }, (_, i) => {
+  const minutes = i * 5;
+  const hour24 = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  const hour12 = hour24 % 12 || 12;
+  const ampm = hour24 < 12 ? "AM" : "PM";
+  return `${hour12}:${String(minute).padStart(2, "0")} ${ampm}`;
+});
+
+const defaultRoutines = {
+  morning: [
+    { id: 1, title: "Bathroom & Brush", timeInSeconds: 300, colorKey: "sky", iconType: "droplets", detail: "Start fresh!" },
+    { id: 2, title: "Skincare & Massage", timeInSeconds: 300, colorKey: "pink", iconType: "sparkles", detail: "Gentle upward sweeps." },
+    { id: 3, title: "Neck & Wrist Stretches", timeInSeconds: 120, colorKey: "lavender", iconType: "activity", detail: "Gentle stretches!" },
+    { id: 4, title: "Seated Spinal Twists", timeInSeconds: 180, colorKey: "peach", iconType: "activity", detail: "Wake muscles up." },
+    { id: 5, title: "Water & Desk Prep", timeInSeconds: 120, colorKey: "mint", iconType: "coffee", detail: "Drink water." },
+  ],
+  night: [
+    { id: 101, title: "Screen Curfew", timeInSeconds: 300, colorKey: "lavender", iconType: "moon", detail: "Put devices away." },
+    { id: 102, title: "Skincare", timeInSeconds: 300, colorKey: "pink", iconType: "droplets", detail: "Wash face." },
+    { id: 103, title: "Prep for Tomorrow", timeInSeconds: 300, colorKey: "sky", iconType: "calendar", detail: "Set out clothes." },
+  ],
+};
+
+const normalizeRoutineTask = (task, fallbackId) => ({
+  id: task.id || fallbackId,
+  title: task.title || "Routine step",
+  timeInSeconds: parseInt(task.timeInSeconds, 10) || 300,
+  colorKey: task.colorKey || "mint",
+  iconType: task.iconType || "sparkles",
+  detail: task.detail || "",
+});
+
+const normalizeRoutines = (routines = defaultRoutines) => ({
+  morning: (routines.morning || defaultRoutines.morning).map((task, i) => normalizeRoutineTask(task, i + 1)),
+  night: (routines.night || defaultRoutines.night).map((task, i) => normalizeRoutineTask(task, i + 101)),
+});
 
 const moneyValue = (value) => parseFloat(value) || 0;
 const formatMoney = (value) => `$${moneyValue(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -681,23 +720,15 @@ export default function App() {
   const [pomoMode, setPomoMode] = useState("work");
   const [routineTimeLeft, setRoutineTimeLeft] = useState(0);
   const [routineTimerActive, setRoutineTimerActive] = useState(false);
+  const [routines, setRoutines] = useState(defaultRoutines);
 
   useEffect(() => {
     try { localStorage.setItem("app_theme_id", themeId); } catch {}
   }, [themeId]);
 
-  const morningRoutine = [
-    { id: 1, title: "Bathroom & Brush", time: "5 mins", timeInSeconds: 300, color: palette.sky, icon: <Droplets className="w-8 h-8" style={{color: palette.skyText}}/>, detail: "Start fresh!" },
-    { id: 2, title: "Skincare & Massage", time: "5 mins", timeInSeconds: 300, color: palette.pink, icon: <Sparkles className="w-8 h-8" style={{color: palette.pinkText}}/>, detail: "Gentle upward sweeps." },
-    { id: 3, title: "Neck & Wrist Stretches", time: "2 mins", timeInSeconds: 120, color: palette.lavender, icon: <Activity className="w-8 h-8" style={{color: palette.lavenderText}}/>, detail: "Gentle stretches!" },
-    { id: 4, title: "Seated Spinal Twists", time: "3 mins", timeInSeconds: 180, color: palette.peach, icon: <Activity className="w-8 h-8" style={{color: palette.peachText}}/>, detail: "Wake muscles up." },
-    { id: 5, title: "Water & Desk Prep", time: "2 mins", timeInSeconds: 120, color: palette.mint, icon: <Coffee className="w-8 h-8" style={{color: palette.mintText}}/>, detail: "Drink water." },
-  ];
-  const nightRoutine = [
-    { id: 101, title: "Screen Curfew", time: "5 mins", timeInSeconds: 300, color: palette.lavender, icon: <Moon className="w-8 h-8" style={{color: palette.lavenderText}}/>, detail: "Put devices away." },
-    { id: 102, title: "Skincare", time: "5 mins", timeInSeconds: 300, color: palette.pink, icon: <Droplets className="w-8 h-8" style={{color: palette.pinkText}}/>, detail: "Wash face." },
-    { id: 103, title: "Prep for Tomorrow", time: "5 mins", timeInSeconds: 300, color: palette.sky, icon: <CalendarIcon className="w-8 h-8" style={{color: palette.skyText}}/>, detail: "Set out clothes." },
-  ];
+  const normalizedRoutines = normalizeRoutines(routines);
+  const morningRoutine = normalizedRoutines.morning;
+  const nightRoutine = normalizedRoutines.night;
 
   const currentScript = scriptType === "inbound" ? inboundScript : outboundScript;
   const setCurrentScript = scriptType === "inbound" ? setInboundScript : setOutboundScript;
@@ -724,6 +755,7 @@ export default function App() {
       setWaterGlasses(data.water ?? 0);
       setReminders(data.reminders ?? []);
       setNotifEnabled(data.notifEnabled ?? false);
+      setRoutines(normalizeRoutines(data.routines ?? defaultRoutines));
       setCompletedTasks(data.routineDate === today ? (data.completedTasks ?? []) : []);
     };
 
@@ -745,6 +777,7 @@ export default function App() {
         water: loadLocal(user.id, "water", 0),
         reminders: loadLocal(user.id, "reminders", []),
         notifEnabled: loadLocal(user.id, "notifEnabled", false),
+        routines: loadLocal(user.id, "routines", defaultRoutines),
         routineDate: loadLocal(user.id, "routineDate", today),
         completedTasks: loadLocal(user.id, "completedTasks", []),
       };
@@ -779,6 +812,7 @@ export default function App() {
   useEffect(() => { if (user && userDataReady) saveLocal(user.id, "reminders", reminders); }, [reminders, user, userDataReady]);
   useEffect(() => { if (user && userDataReady) saveLocal(user.id, "notifEnabled", notifEnabled); }, [notifEnabled, user, userDataReady]);
   useEffect(() => { if (user && userDataReady) saveLocal(user.id, "completedTasks", completedTasks); }, [completedTasks, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "routines", routines); }, [routines, user, userDataReady]);
 
   useEffect(() => {
     if (!user || !userDataReady) return;
@@ -787,6 +821,7 @@ export default function App() {
     if (savedRoutineDate !== today) {
       setCompletedTasks([]);
       setActiveTaskIndex(0);
+      setRoutineTimerActive(false);
       saveLocal(user.id, "routineDate", today);
       saveLocal(user.id, "completedTasks", []);
     }
@@ -887,8 +922,12 @@ export default function App() {
 
   useEffect(() => {
     const arr = currentRoutineType === "morning" ? morningRoutine : nightRoutine;
+    if (activeTaskIndex >= arr.length && arr.length > 0) {
+      setActiveTaskIndex(0);
+      return;
+    }
     if (arr[activeTaskIndex]) { setRoutineTimeLeft(arr[activeTaskIndex].timeInSeconds); setRoutineTimerActive(false); }
-  }, [activeTaskIndex, currentRoutineType]);
+  }, [activeTaskIndex, currentRoutineType, routines]);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -965,7 +1004,7 @@ export default function App() {
       const reply = await askClaude(updatedChat, systemMap[section] + context, 600);
       setSectionAIChats(p => ({ ...p, [section]: [...updatedChat, { role: "assistant", content: reply }] }));
     } catch (e) {
-      setSectionAIChats(p => ({ ...p, [section]: [...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. The built-in test coach should work without a key, so check that netlify/functions/ask-ai.js was uploaded and redeployed." }] }));
+      setSectionAIChats(p => ({ ...p, [section]: [...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. On Vercel, check that api/ask-ai.js is deployed and that GROQ_API_KEY is saved in Environment Variables, then redeploy." }] }));
     }
     setSectionAILoading(p => ({ ...p, [section]: false }));
   };
@@ -983,7 +1022,7 @@ export default function App() {
       setMasterChat([...updatedChat, { role: "assistant", content: cleanReply || "Done — I updated that for you." }]);
       actions.forEach(action => executeAction(action));
     } catch (e) {
-      setMasterChat([...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. The built-in test coach should work without a key, so check that netlify/functions/ask-ai.js was uploaded and redeployed." }]);
+      setMasterChat([...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. On Vercel, check that api/ask-ai.js is deployed and that GROQ_API_KEY is saved in Environment Variables, then redeploy." }]);
     }
     setMasterLoading(false);
   };
@@ -1079,6 +1118,7 @@ export default function App() {
     const now = currentTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     setCallLog([{ id: Date.now(), time: now, result: newCallResult, notes: newCallNotes }, ...callLog]);
     if (newCallResult === "appointment") { setAppointments(a => a + 1); rewardStars(10); setCallStreak(s => s + 1); }
+    else if (newCallResult === "cancelled") { setAppointments(a => Math.max(0, a - 1)); setCallStreak(0); }
     else setCallStreak(0);
     setNewCallNotes("");
   };
@@ -1124,7 +1164,16 @@ export default function App() {
   const togglePin = (id) => setNotes(notes.map(n => n.id === id ? { ...n, pinned: !n.pinned } : n));
 
   const deleteCalendarEvent = (id) => setCalendarEvents(p => p.filter(e => e.id !== id));
-  const deleteCallLogEntry = (id) => setCallLog(p => p.filter(c => c.id !== id));
+  const cancelAppointment = () => {
+    setAppointments(a => Math.max(0, a - 1));
+    setCallStreak(0);
+    setCallLog(p => [{ id: Date.now(), time: currentTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }), result: "cancelled", notes: "Appointment cancelled" }, ...p]);
+  };
+  const deleteCallLogEntry = (id) => {
+    const deleted = callLog.find(c => c.id === id);
+    if (deleted?.result === "appointment") setAppointments(a => Math.max(0, a - 1));
+    setCallLog(p => p.filter(c => c.id !== id));
+  };
   const deleteObjection = (id) => setObjections(p => p.filter(o => o.id !== id));
   const startEditObjection = (obj) => { setEditingObjection(obj.id); setObjectionEditValues({ q: obj.q, a: obj.a }); };
   const saveEditObjection = () => { setObjections(p => p.map(o => o.id === editingObjection ? { ...o, q: objectionEditValues.q, a: objectionEditValues.a } : o)); setEditingObjection(null); };
@@ -1156,6 +1205,43 @@ export default function App() {
     setNewReminder({ time: "", message: "" });
   };
   const deleteReminder = (id) => setReminders(p => p.filter(r => r.id !== id));
+
+  const routineVisual = (task) => {
+    const colorKey = task.colorKey || "mint";
+    const color = palette[colorKey] || palette.mint;
+    const textColor = palette[`${colorKey}Text`] || palette.mintText;
+    const iconProps = { className: "w-8 h-8", style: { color: textColor } };
+    const icons = {
+      activity: <Activity {...iconProps}/>,
+      calendar: <CalendarIcon {...iconProps}/>,
+      coffee: <Coffee {...iconProps}/>,
+      droplets: <Droplets {...iconProps}/>,
+      moon: <Moon {...iconProps}/>,
+      sparkles: <Sparkles {...iconProps}/>,
+      sun: <Sun {...iconProps}/>,
+    };
+    return { color, textColor, icon: icons[task.iconType] || icons.sparkles };
+  };
+
+  const updateRoutineTask = (type, id, changes) => {
+    setRoutines(prev => ({
+      ...prev,
+      [type]: (prev[type] || []).map(task => task.id === id ? normalizeRoutineTask({ ...task, ...changes }, id) : task),
+    }));
+  };
+
+  const addRoutineTask = (type) => {
+    const id = Date.now();
+    setRoutines(prev => ({
+      ...prev,
+      [type]: [...(prev[type] || []), { id, title: "New step", timeInSeconds: 300, colorKey: type === "morning" ? "mint" : "lavender", iconType: "sparkles", detail: "" }],
+    }));
+  };
+
+  const deleteRoutineTask = (type, id) => {
+    setRoutines(prev => ({ ...prev, [type]: (prev[type] || []).filter(task => task.id !== id) }));
+    setCompletedTasks(prev => prev.filter(taskId => taskId !== id));
+  };
 
   const noteColors = [palette.pink, palette.mint, palette.lavender, palette.sky, palette.cream, palette.peach];
 
@@ -1350,6 +1436,35 @@ export default function App() {
             </div>
           </div>
 
+          {/* Routine editor */}
+          <div className="rounded-3xl p-4 border-2 border-white shadow-sm" style={{background: `linear-gradient(135deg, ${palette.sky}50, white)`}}>
+            <div className="flex items-center gap-2 mb-3">
+              <Sun className="w-4 h-4" style={{color: palette.skyText}}/>
+              <h4 className="font-bold text-sm" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}>Routine Editor</h4>
+            </div>
+            {["morning", "night"].map(type => (
+              <div key={type} className="mb-4 last:mb-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider" style={{color: type === "morning" ? palette.peachText : palette.lavenderText}}>{type === "morning" ? "Morning Warmup" : "Night Wind Down"}</span>
+                  <button onClick={() => addRoutineTask(type)} className="text-xs font-bold px-2.5 py-1 rounded-full" style={{background: palette.mint, color: palette.mintText}}>+ Step</button>
+                </div>
+                <div className="space-y-2">
+                  {(routines[type] || []).map(task => (
+                    <div key={task.id} className="rounded-2xl p-3 border bg-white/80" style={{borderColor: palette.skyDeep}}>
+                      <div className="grid grid-cols-[1fr_74px_32px] gap-2 mb-2">
+                        <input value={task.title} onChange={e => updateRoutineTask(type, task.id, { title: e.target.value })} className="text-xs font-bold p-2 rounded-lg focus:outline-none" style={{border: `1px solid ${palette.sky}`}}/>
+                        <input type="number" min="1" value={Math.max(1, Math.round((task.timeInSeconds || 300) / 60))} onChange={e => updateRoutineTask(type, task.id, { timeInSeconds: (parseInt(e.target.value, 10) || 1) * 60 })} className="text-xs p-2 rounded-lg focus:outline-none" style={{border: `1px solid ${palette.sky}`}}/>
+                        <button onClick={() => deleteRoutineTask(type, task.id)} className="rounded-lg flex items-center justify-center" style={{background: palette.pink, color: palette.pinkText}}><Trash2 className="w-3.5 h-3.5"/></button>
+                      </div>
+                      <input value={task.detail || ""} onChange={e => updateRoutineTask(type, task.id, { detail: e.target.value })} placeholder="What should this step say?" className="w-full text-xs p-2 rounded-lg focus:outline-none" style={{border: `1px solid ${palette.sky}`}}/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <p className="text-[10px] mt-3 opacity-60" style={{color: palette.skyText}}>Progress still resets every day automatically.</p>
+          </div>
+
           {/* Notifications */}
           <div className="rounded-3xl p-4 border-2 border-white shadow-sm" style={{background: `linear-gradient(135deg, ${palette.cream}60, white)`}}>
             <div className="flex items-center justify-between mb-3">
@@ -1487,8 +1602,8 @@ export default function App() {
   );
 
   const renderTimeline = () => {
-    const morningProgress = Math.round((completedTasks.filter(id => id < 100).length / morningRoutine.length) * 100) || 0;
-    const nightProgress = Math.round((completedTasks.filter(id => id > 100).length / nightRoutine.length) * 100) || 0;
+    const morningProgress = Math.round((morningRoutine.filter(task => completedTasks.includes(task.id)).length / morningRoutine.length) * 100) || 0;
+    const nightProgress = Math.round((nightRoutine.filter(task => completedTasks.includes(task.id)).length / nightRoutine.length) * 100) || 0;
     const selectedDateObj = new Date(currentTime.getFullYear(), currentTime.getMonth(), selectedPlanDate);
     const selectedDateLabel = selectedDateObj.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
     const selectedDateString = String(selectedPlanDate);
@@ -1558,7 +1673,10 @@ export default function App() {
           {isEditingSchedule && (
             <div className="mt-5 pt-4 border-t flex flex-col gap-2" style={{borderColor: palette.lavender}}>
               <div className="flex gap-2">
-                <input type="text" placeholder="Time (e.g. 8:00 AM)" value={newScheduleItem.time} onChange={e => setNewScheduleItem({...newScheduleItem, time: e.target.value})} className="flex-1 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`}}/>
+                <select value={newScheduleItem.time} onChange={e => setNewScheduleItem({...newScheduleItem, time: e.target.value})} className="flex-1 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`}}>
+                  <option value="">Choose time</option>
+                  {TIME_OPTIONS.map(time => <option key={time} value={time}>{time}</option>)}
+                </select>
                 <select value={newScheduleItem.type} onChange={e => setNewScheduleItem({...newScheduleItem, type: e.target.value})} className="text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.lavender}`}}>
                   <option value="work">Work</option><option value="break">Break</option><option value="routine">Routine</option><option value="finish">Finish</option>
                 </select>
@@ -1788,6 +1906,11 @@ export default function App() {
             {value: callLog.length, label: "CALLS", sub: "today", color: palette.pink, tc: palette.pinkText},
           ].map((stat, i) => (
             <div key={i} className="rounded-2xl p-4 text-center shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${stat.color}90, ${stat.color}50)`}}>
+              {stat.label === "APPTS" && appointments > 0 && (
+                <button onClick={cancelAppointment} title="Cancel one appointment" className="float-right -mt-1 -mr-1 p-1 rounded-full bg-white/70" style={{color: stat.tc}}>
+                  <Trash2 className="w-3 h-3"/>
+                </button>
+              )}
               <div className="text-3xl font-extrabold" style={{color: stat.tc, fontFamily: "'Fraunces', serif"}}>{stat.value}</div>
               <div className="text-[10px] font-bold tracking-wider mt-1" style={{color: stat.tc, opacity: 0.7}}>{stat.label}</div>
               <div className="text-[10px] font-bold mt-0.5" style={{color: stat.tc}}>{stat.sub}</div>
@@ -1895,6 +2018,7 @@ export default function App() {
               {[
                 {v: "appointment", label: "📅 Appt", c: palette.mint, tc: palette.mintText},
                 {v: "callback", label: "📞 Callback", c: palette.cream, tc: palette.creamText},
+                {v: "cancelled", label: "🗑 Cancel", c: palette.sky, tc: palette.skyText},
                 {v: "no", label: "❌ No", c: palette.pink, tc: palette.pinkText},
               ].map(opt => (
                 <button key={opt.v} onClick={() => setNewCallResult(opt.v)} className={`flex-1 py-2.5 rounded-xl text-xs font-bold ${newCallResult === opt.v ? "shadow-md scale-105" : "opacity-50"}`} style={{background: opt.c, color: opt.tc}}>{opt.label}</button>
@@ -1915,7 +2039,7 @@ export default function App() {
                 <div className="border-t divide-y max-h-48 overflow-y-auto" style={{borderColor: palette.pink}}>
                   {callLog.map(call => (
                     <div key={call.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <span className="text-lg">{call.result === "appointment" ? "📅" : call.result === "callback" ? "📞" : "❌"}</span>
+                      <span className="text-lg">{call.result === "appointment" ? "📅" : call.result === "callback" ? "📞" : call.result === "cancelled" ? "🗑" : "❌"}</span>
                       <div className="flex-grow min-w-0">
                         <div className="text-xs font-bold truncate" style={{color: palette.pinkText}}>{call.notes || "No notes"}</div>
                         <div className="text-xs opacity-50" style={{color: palette.pinkText}}>{call.time}</div>
@@ -2463,7 +2587,18 @@ export default function App() {
   const renderRoutine = () => {
     const arr = currentRoutineType === "morning" ? morningRoutine : nightRoutine;
     const task = arr[activeTaskIndex];
+    if (!task) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-6" style={{background: `linear-gradient(180deg, ${palette.bg}, ${palette.bgWarm})`}}>
+          <div className="text-center rounded-3xl p-6 bg-white/80 shadow-md">
+            <p className="text-sm font-bold mb-3" style={{color: palette.lavenderText}}>No routine steps yet.</p>
+            <button onClick={() => setShowSettings(true)} className="px-4 py-2 rounded-2xl text-xs font-bold text-white" style={{background: palette.lavenderText}}>Edit routines</button>
+          </div>
+        </div>
+      );
+    }
     const isLast = activeTaskIndex === arr.length - 1;
+    const visual = routineVisual(task);
     const bgGradient = currentRoutineType === "morning" ? `linear-gradient(180deg, ${palette.cream}, ${palette.peach}, ${palette.pink})` : `linear-gradient(180deg, ${palette.lavender}, ${palette.sky}, ${palette.pink})`;
     return (
       <div className="min-h-screen flex flex-col p-6 absolute inset-0 z-50" style={{background: bgGradient}}>
@@ -2473,7 +2608,7 @@ export default function App() {
           <div className="w-10"/>
         </div>
         <div className="flex-grow flex flex-col items-center justify-center text-center">
-          <div className="w-32 h-32 rounded-full shadow-2xl flex items-center justify-center mb-6 border-4 border-white" style={{background: task.color}}>{task.icon}</div>
+          <div className="w-32 h-32 rounded-full shadow-2xl flex items-center justify-center mb-6 border-4 border-white" style={{background: visual.color}}>{visual.icon}</div>
           <h2 className="text-3xl font-bold mb-3" style={{color: "#5C5470", fontFamily: "'Fraunces', serif"}}>{task.title}</h2>
           <div className="p-5 rounded-3xl shadow-md max-w-sm mb-6 border-2 border-white" style={{background: "rgba(255,255,255,0.7)"}}><p className="text-sm" style={{color: "#5C5470"}}>{task.detail}</p></div>
           <div className="p-5 rounded-3xl flex flex-col items-center mb-6 min-w-[200px] shadow-md border-2 border-white" style={{background: "rgba(255,255,255,0.8)"}}>
@@ -2557,4 +2692,5 @@ export default function App() {
     </div>
   );
 }
+
 
