@@ -907,7 +907,7 @@ export default function App() {
 
   // ─── MAIN APP (when logged in) ─────────────────
 
-  const SectionAI = ({ section, color, textColor, emoji, name }) => {
+  const renderSectionAI = ({ section, color, textColor, emoji, name }) => {
     const isOpen = openSectionAI === section;
     return (
       <div className="rounded-3xl shadow-md border-2 border-white overflow-hidden backdrop-blur-md" style={{background: `linear-gradient(135deg, ${color}80, white)`}}>
@@ -1406,7 +1406,7 @@ export default function App() {
           ))}
         </div>
 
-        <SectionAI section="work" color={palette.mint} textColor={palette.mintText} emoji="📞" name="Work AI Coach"/>
+        {renderSectionAI({ section: "work", color: palette.mint, textColor: palette.mintText, emoji: "📞", name: "Work AI Coach" })}
 
         <div className="flex gap-2 p-1.5 rounded-2xl shadow-inner" style={{background: "rgba(255,255,255,0.6)"}}>
           <button onClick={() => { setScriptType("inbound"); setActiveScriptSection(inboundScript[0]?.id || "intro"); }} className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5" style={scriptType === "inbound" ? {background: palette.mint, color: palette.mintText, boxShadow: "0 2px 8px rgba(0,0,0,0.08)"} : {color: "#9CA3AF"}}>
@@ -1652,7 +1652,7 @@ export default function App() {
             <Plus className="w-3.5 h-3.5"/>New
           </button>
         </div>
-        <SectionAI section="notes" color={palette.lavender} textColor={palette.lavenderText} emoji="📝" name="Notes AI"/>
+        {renderSectionAI({ section: "notes", color: palette.lavender, textColor: palette.lavenderText, emoji: "📝", name: "Notes AI" })}
         {showNewNote && (
           <div className="rounded-3xl p-5 shadow-md border-2" style={{background: `linear-gradient(135deg, ${palette.lavender}40, white)`, borderColor: palette.lavender}}>
             <div className="flex gap-2 mb-3">
@@ -1816,7 +1816,7 @@ export default function App() {
           {Array.from({length: 8}, (_, i) => <div key={i} className="flex-1 h-3 rounded-full shadow-inner" style={{background: i < waterGlasses ? `linear-gradient(90deg, ${palette.skyDeep}, ${palette.mintDeep})` : "rgba(255,255,255,0.6)"}}></div>)}
         </div>
       </div>
-      <SectionAI section="health" color={palette.pink} textColor={palette.pinkText} emoji="🌿" name="Wellness AI"/>
+      {renderSectionAI({ section: "health", color: palette.pink, textColor: palette.pinkText, emoji: "🌿", name: "Wellness AI" })}
     </div>
   );
 
@@ -1958,7 +1958,7 @@ export default function App() {
             </div>
           )}
         </div>
-        <SectionAI section="budget" color={palette.cream} textColor={palette.creamText} emoji="💰" name="Budget AI Coach"/>
+        {renderSectionAI({ section: "budget", color: palette.cream, textColor: palette.creamText, emoji: "💰", name: "Budget AI Coach" })}
         <div className="space-y-4">{tableConfigs.map(cfg => <div key={cfg.key}>{renderTable(cfg)}</div>)}</div>
       </div>
     );
