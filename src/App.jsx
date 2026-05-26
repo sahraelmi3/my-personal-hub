@@ -12,7 +12,7 @@ import {
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
-authDomain: "my-personal-hub-debb3.firebaseapp.com",
+authDomain: "my-personal-hub-debb3.firebaseapp.com",h
 projectId: "my-personal-hub-debb3",
 storageBucket: "my-personal-hub-debb3.firebasestorage.app",
 messagingSenderId: "681025832181",
@@ -557,12 +557,12 @@ export default function App() {
   const togglePomodoro = () => setPomoActive(!pomoActive);
   const resetPomodoro = () => { setPomoActive(false); setPomoTime(pomoMode === "work" ? 25 * 60 : 5 * 60); };
   const switchPomodoroMode = (mode) => { setPomoActive(false); setPomoMode(mode); setPomoTime(mode === "work" ? 25 * 60 : 5 * 60); };
-  const startRoutine = (type) => { setCurrentRoutineType(type); setActiveTaskIndex(0); setActiveTab("routine"); };
+  const startRoutine = (type) => { setCurrentRoutineType(type); setActiveTaskIndex(0); setCompletedTasks([]); setActiveTab("routine"); };
   const completeTask = (taskId) => {
     const arr = currentRoutineType === "morning" ? morningRoutine : nightRoutine;
     if (!completedTasks.includes(taskId)) { setCompletedTasks([...completedTasks, taskId]); rewardStars(10); }
     if (activeTaskIndex < arr.length - 1) setActiveTaskIndex(activeTaskIndex + 1);
-    else { setActiveTab("timeline"); setCompletedTasks([]); }
+    else { setActiveTab("timeline"); }
   };
 
   const handleSectionAISubmit = async (section) => {
