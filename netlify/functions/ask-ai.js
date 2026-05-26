@@ -1,5 +1,6 @@
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
 const GEMINI_MODEL = "gemini-2.0-flash";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -8,11 +9,16 @@ exports.handler = async (event) => {
 
   const geminiApiKey = process.env.GEMINI_API_KEY;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const groqApiKey = process.env.GROQ_API_KEY;
 
   try {
     const { messages, system, maxTokens = 1000 } = JSON.parse(event.body || "{}");
     if (!Array.isArray(messages) || !system) {
       return json(400, { error: "messages and system are required." });
+    }
+
+    if (groqApiKey) {
+      return await askGroq({ apiKey: groqApiKey, messages, system, maxTokens });
     }
 
     if (geminiApiKey) {
@@ -28,6 +34,41 @@ exports.handler = async (event) => {
     return json(500, { error: error.message || "AI function failed." });
   }
 };
+
+async function askGroq({ apiKey, messages, system, maxTokens }) {
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      max_tokens: maxTokens,
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: system },
+        ...messages.slice(-12).map((message) => ({
+          role: message.role === "assistant" ? "assistant" : "user",
+          content: String(message.content || ""),
+        })),
+      ],
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    console.warn("Groq request failed, trying fallback:", data.error?.message || response.status);
+    return json(200, {
+      reply: createPlaceholderReply(messages, system),
+      provider: "placeholder",
+      providerError: data.error?.message || "Groq request failed.",
+    });
+  }
+
+  const reply = data.choices?.[0]?.message?.content?.trim();
+  return json(200, { reply: reply || createPlaceholderReply(messages, system), provider: "groq" });
+}
 
 async function askGemini({ apiKey, messages, system, maxTokens }) {
   const contents = messages.slice(-12).map((message) => ({
