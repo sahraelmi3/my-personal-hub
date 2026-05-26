@@ -1,5 +1,5 @@
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
