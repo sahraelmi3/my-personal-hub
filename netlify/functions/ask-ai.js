@@ -1,5 +1,5 @@
 const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-2.0-flash";
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -53,11 +53,16 @@ async function askGemini({ apiKey, messages, system, maxTokens }) {
 
   const data = await response.json();
   if (!response.ok) {
-    return json(response.status, { error: data.error?.message || "Gemini request failed." });
+    console.warn("Gemini request failed, using placeholder fallback:", data.error?.message || response.status);
+    return json(200, {
+      reply: createPlaceholderReply(messages, system),
+      provider: "placeholder",
+      providerError: data.error?.message || "Gemini request failed.",
+    });
   }
 
   const reply = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-  return json(200, { reply: reply || "I could not think of a response right now." });
+  return json(200, { reply: reply || createPlaceholderReply(messages, system), provider: "gemini" });
 }
 
 async function askAnthropic({ apiKey, messages, system, maxTokens }) {
@@ -78,11 +83,16 @@ async function askAnthropic({ apiKey, messages, system, maxTokens }) {
 
   const data = await response.json();
   if (!response.ok) {
-    return json(response.status, { error: data.error?.message || "Anthropic request failed." });
+    console.warn("Anthropic request failed, using placeholder fallback:", data.error?.message || response.status);
+    return json(200, {
+      reply: createPlaceholderReply(messages, system),
+      provider: "placeholder",
+      providerError: data.error?.message || "Anthropic request failed.",
+    });
   }
 
   const reply = data.content?.map((block) => block.text || "").join("").trim();
-  return json(200, { reply: reply || "I could not think of a response right now." });
+  return json(200, { reply: reply || createPlaceholderReply(messages, system), provider: "anthropic" });
 }
 
 function json(statusCode, body) {
