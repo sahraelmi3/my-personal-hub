@@ -12,7 +12,7 @@ import {
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
-authDomain: "my-personal-hub-debb3.firebaseapp.com",h
+authDomain: "my-personal-hub-debb3.firebaseapp.com",
 projectId: "my-personal-hub-debb3",
 storageBucket: "my-personal-hub-debb3.firebasestorage.app",
 messagingSenderId: "681025832181",
