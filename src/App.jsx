@@ -11,14 +11,14 @@ import {
 // ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
-  // apiKey: "your-api-key-here",
-  // authDomain: "your-app.firebaseapp.com",
-  // projectId: "your-project-id",
-  // storageBucket: "your-app.appspot.com",
-  // messagingSenderId: "123456789",
-  // appId: "1:123:web:abc"
+  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
+authDomain: "my-personal-hub-debb3.firebaseapp.com",
+projectId: "my-personal-hub-debb3",
+storageBucket: "my-personal-hub-debb3.firebasestorage.app",
+messagingSenderId: "681025832181",
+appId: "1:681025832181:web:945e8e3eadf9d679831bc"
 };
-const FIREBASE_ENABLED = false; // ← Change to true once you've pasted your config above
+const FIREBASE_ENABLED = true; // ← Change to true once you've pasted your config above
 
 const palette = {
   pink: "#FFD6E8", pinkDeep: "#FFA5C9", pinkText: "#B8527A",
