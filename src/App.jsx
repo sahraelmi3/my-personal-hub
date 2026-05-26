@@ -8,17 +8,68 @@ import {
   Check, Save, Wand2, Bell, BellOff, LogOut, User, Mail, Lock, UserPlus
 } from "lucide-react";
 
-// ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
-// Get this from https://console.firebase.google.com → Project Settings → General → Your apps
+// â”€â”€â”€ FIREBASE CONFIG (paste your config here once you set up Firebase) â”€â”€â”€â”€
+// Get this from https://console.firebase.google.com â†’ Project Settings â†’ General â†’ Your apps
 const FIREBASE_CONFIG = {
-  // apiKey: "your-api-key-here",
-  // authDomain: "your-app.firebaseapp.com",
-  // projectId: "your-project-id",
-  // storageBucket: "your-app.appspot.com",
-  // messagingSenderId: "123456789",
-  // appId: "1:123:web:abc"
+  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
+  authDomain: "my-personal-hub-debb3.firebaseapp.com",
+  projectId: "my-personal-hub-debb3",
+  storageBucket: "my-personal-hub-debb3.firebasestorage.app",
+  messagingSenderId: "681025832181",
+  appId: "1:681025832181:web:945e8e3eadf9d679831bc"
 };
-const FIREBASE_ENABLED = false; // ← Change to true once you've pasted your config above
+const FIREBASE_ENABLED = true;
+
+let firebaseAppPromise = null;
+let firestorePromise = null;
+
+const getCloudDocId = (fallbackUserId) => {
+  try {
+    const current = JSON.parse(localStorage.getItem("app_current_user") || "null");
+    return (current?.email || fallbackUserId).toLowerCase().replace(/\//g, "_");
+  } catch {
+    return fallbackUserId;
+  }
+};
+
+const getFirestoreDb = async () => {
+  if (!FIREBASE_ENABLED) return null;
+  if (!firebaseAppPromise) {
+    firebaseAppPromise = import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js")
+      .then(({ initializeApp, getApps }) => getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG));
+  }
+  if (!firestorePromise) {
+    firestorePromise = Promise.all([
+      firebaseAppPromise,
+      import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js")
+    ]).then(([app, firestore]) => firestore.getFirestore(app));
+  }
+  return firestorePromise;
+};
+
+const saveCloudData = async (userId, key, data) => {
+  try {
+    const db = await getFirestoreDb();
+    if (!db) return;
+    const { doc, setDoc, serverTimestamp } = await import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+    await setDoc(doc(db, "users", getCloudDocId(userId)), { [key]: data, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    console.warn("Firebase save skipped:", error.message);
+  }
+};
+
+const loadCloudData = async (userId) => {
+  try {
+    const db = await getFirestoreDb();
+    if (!db) return null;
+    const { doc, getDoc } = await import(/* @vite-ignore */ "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js");
+    const snap = await getDoc(doc(db, "users", getCloudDocId(userId)));
+    return snap.exists() ? snap.data() : null;
+  } catch (error) {
+    console.warn("Firebase load skipped:", error.message);
+    return null;
+  }
+};
 
 const palette = {
   pink: "#FFD6E8", pinkDeep: "#FFA5C9", pinkText: "#B8527A",
@@ -61,10 +112,11 @@ async function askClaude(messages, systemPrompt, maxTokens = 1000) {
   throw lastError || new Error("AI request failed");
 }
 
-// ─── LOCAL STORAGE HELPERS (used until Firebase is connected) ──────
+// â”€â”€â”€ LOCAL STORAGE HELPERS (used until Firebase is connected) â”€â”€â”€â”€â”€â”€
 const lsKey = (userId, key) => `app_${userId}_${key}`;
 const saveLocal = (userId, key, data) => {
   try { localStorage.setItem(lsKey(userId, key), JSON.stringify(data)); } catch {}
+  if (FIREBASE_ENABLED) saveCloudData(userId, key, data);
 };
 const loadLocal = (userId, key, fallback) => {
   try {
@@ -73,7 +125,7 @@ const loadLocal = (userId, key, fallback) => {
   } catch { return fallback; }
 };
 
-// ─── AUTH STORAGE (works without Firebase using localStorage) ───────
+// â”€â”€â”€ AUTH STORAGE (works without Firebase using localStorage) â”€â”€â”€â”€â”€â”€â”€
 const getStoredUsers = () => {
   try { return JSON.parse(localStorage.getItem("app_users") || "{}"); } catch { return {}; }
 };
@@ -86,7 +138,7 @@ const setCurrentUser = (user) => {
   else localStorage.removeItem("app_current_user");
 };
 
-// ─── NOTIFICATIONS ────────────────────────────────────────────
+// â”€â”€â”€ NOTIFICATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const requestNotificationPermission = async () => {
   if (!("Notification" in window)) return "unsupported";
   if (Notification.permission === "granted") return "granted";
@@ -95,7 +147,7 @@ const requestNotificationPermission = async () => {
   return result;
 };
 
-const sendNotification = (title, body, icon = "🌸") => {
+const sendNotification = (title, body, icon = "ðŸŒ¸") => {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   try {
     new Notification(title, { body, icon: undefined, badge: undefined, tag: "app-reminder" });
@@ -104,7 +156,7 @@ const sendNotification = (title, body, icon = "🌸") => {
 
 const BUDGET_AI = `You are the user's personal financial coach. Be warm, specific, concise (2-4 sentences). The budget uses "Need" for planned/required money and "Actual" for what was spent, received, paid, or saved. Reference actual numbers when shared. Always end with a question or actionable next step.`;
 const WORK_AI = `You are the user's call center coach. They book home improvement appointments (windows, doors, bathrooms). Be warm, tactical, concise (2-4 sentences). Give specific phrasing for objections, confidence tips, booking techniques.`;
-const HEALTH_AI = `You are the user's wellness coach. Be warm, specific (2-4 sentences). Suggest quick desk stretches, hydration, energy management, easy meals. Never give medical advice — refer to their doctor.`;
+const HEALTH_AI = `You are the user's wellness coach. Be warm, specific (2-4 sentences). Suggest quick desk stretches, hydration, energy management, easy meals. Never give medical advice â€” refer to their doctor.`;
 const NOTES_AI = `You are the user's note-taking assistant. Help organize thoughts, brainstorm, summarize. Warm and concise (2-4 sentences).`;
 const MASTER_AI = `You are the user's main AI assistant with power to make changes in their app.
 You can perform actions by including action blocks. The app will hide these blocks from the user and run them.
@@ -122,14 +174,14 @@ Format:
 {"type": "add_note", "data": {"title": "...", ...}}
 \`\`\`
 For appointments or dated events, include BOTH add_calendar and add_schedule with the same date. For multiple actions, include multiple action blocks. Do not use \`\`\`json for app actions. Keep the visible response 1-2 friendly sentences and never describe the hidden JSON.`;
-const LISTENING_SYSTEM = `You are an AI sales coach listening live. Script flow: Intro → Qualify → Needs → Commit → Value of Visit → Close → Button-Up.
+const LISTENING_SYSTEM = `You are an AI sales coach listening live. Script flow: Intro â†’ Qualify â†’ Needs â†’ Commit â†’ Value of Visit â†’ Close â†’ Button-Up.
 Respond ONLY in JSON: {"status": "on_track" | "off_track" | "objection" | "buying_signal", "stage": "intro|qualify|needs|transition|vov|close|buttonup|unknown", "tip": "ONE specific sentence to say next", "alert": "brief alert if needed"}
 Keep tips under 20 words.`;
 const SEGUE_SYSTEM = `Customer just said something unexpected. Give 2-3 short bring-back lines (each under 20 words) that 1) validate the customer 2) transition back to script. Be specific.`;
 
-// ─── DEFAULT DATA FOR NEW USERS ──────────────────────────
+// â”€â”€â”€ DEFAULT DATA FOR NEW USERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const defaultSchedule = [
-  { id: 1, time: "8:00 AM", event: "Start your day ✨", type: "work" },
+  { id: 1, time: "8:00 AM", event: "Start your day âœ¨", type: "work" },
   { id: 2, time: "12:00 PM", event: "Lunch break", type: "break" },
   { id: 3, time: "5:00 PM", event: "Wrap up", type: "finish" },
 ];
@@ -180,7 +232,7 @@ const defaultBudget = {
 };
 
 const defaultNotes = [
-  { id: 1, title: "Welcome! 🌸", emoji: "💜", color: palette.lavender, content: "This is your personal space. Tap to edit, pin important notes, and use the AI to brainstorm!", pinned: true, createdAt: new Date().toISOString() },
+  { id: 1, title: "Welcome! ðŸŒ¸", emoji: "ðŸ’œ", color: palette.lavender, content: "This is your personal space. Tap to edit, pin important notes, and use the AI to brainstorm!", pinned: true, createdAt: new Date().toISOString() },
 ];
 
 const defaultObjections = [
@@ -188,19 +240,19 @@ const defaultObjections = [
 ];
 
 const defaultInboundScript = [
-  { id: "intro", label: "Intro", color: palette.mint, textColor: palette.mintText, emoji: "👋",
+  { id: "intro", label: "Intro", color: palette.mint, textColor: palette.mintText, emoji: "ðŸ‘‹",
     lines: [
       { id: "l1", type: "say", text: "Hi! How can I help you today?" },
       { id: "l2", type: "customer", text: "I'm interested in learning more about your services." },
       { id: "l3", type: "say", text: "Great! My name is [Your Name], and you are?" },
     ]
   },
-  { id: "needs", label: "Needs", color: palette.peach, textColor: palette.peachText, emoji: "🔍",
+  { id: "needs", label: "Needs", color: palette.peach, textColor: palette.peachText, emoji: "ðŸ”",
     lines: [
       { id: "l4", type: "say", text: "Tell me a little about what you're looking for." },
     ]
   },
-  { id: "close", label: "Close", color: palette.sky, textColor: palette.skyText, emoji: "📅",
+  { id: "close", label: "Close", color: palette.sky, textColor: palette.skyText, emoji: "ðŸ“…",
     lines: [
       { id: "l5", type: "say", text: "Let's schedule a time to chat in person. What works for you?" },
     ]
@@ -208,12 +260,12 @@ const defaultInboundScript = [
 ];
 
 const defaultOutboundScript = [
-  { id: "placeholder", label: "Add Your Script", color: palette.lavender, textColor: palette.lavenderText, emoji: "📞",
+  { id: "placeholder", label: "Add Your Script", color: palette.lavender, textColor: palette.lavenderText, emoji: "ðŸ“ž",
     lines: [{ id: "ob1", type: "tip", text: "Tap the edit pencil to add your outbound script lines!" }] }
 ];
 
 export default function App() {
-  // ─── AUTH STATE ─────────────────────────────────
+  // â”€â”€â”€ AUTH STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [user, setUser] = useState(null); // {id, email, displayName}
   const [authView, setAuthView] = useState("login"); // 'login' | 'signup'
   const [authForm, setAuthForm] = useState({ email: "", password: "", displayName: "" });
@@ -234,7 +286,7 @@ export default function App() {
     setAuthLoading(true);
     const users = getStoredUsers();
     if (users[email]) { setAuthError("Account exists. Try logging in!"); setAuthLoading(false); return; }
-    const newUser = { id: `u_${Date.now()}`, email, displayName, password }; // password stored locally for demo
+    const newUser = { id: email.toLowerCase(), email, displayName, password }; // password stored locally for local fallback
     users[email] = newUser;
     saveStoredUsers(users);
     const sessionUser = { id: newUser.id, email, displayName };
@@ -260,12 +312,14 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     setUser(null);
+    setUserDataReady(false);
     setAuthForm({ email: "", password: "", displayName: "" });
     setAuthView("login");
   };
 
-  // ─── APP STATE (only populated when logged in) ─────
+  // â”€â”€â”€ APP STATE (only populated when logged in) â”€â”€â”€â”€â”€
   const [activeTab, setActiveTab] = useState("timeline");
+  const [userDataReady, setUserDataReady] = useState(false);
   const [stars, setStars] = useState(0);
   const [activeTaskIndex, setActiveTaskIndex] = useState(0);
   const [completedTasks, setCompletedTasks] = useState([]);
@@ -295,7 +349,7 @@ export default function App() {
   const [notes, setNotes] = useState([]);
   const [editingNote, setEditingNote] = useState(null);
   const [newNoteTitle, setNewNoteTitle] = useState("");
-  const [newNoteEmoji, setNewNoteEmoji] = useState("✨");
+  const [newNoteEmoji, setNewNoteEmoji] = useState("âœ¨");
   const [newNoteColor, setNewNoteColor] = useState(palette.lavender);
   const [showNewNote, setShowNewNote] = useState(false);
   const [scriptType, setScriptType] = useState("inbound");
@@ -318,7 +372,7 @@ export default function App() {
   const [editingLine, setEditingLine] = useState(null);
   const [lineEditValues, setLineEditValues] = useState({});
 
-  // ─── NOTIFICATIONS STATE ────────────────────────
+  // â”€â”€â”€ NOTIFICATIONS STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [notifPermission, setNotifPermission] = useState("default");
   const [notifEnabled, setNotifEnabled] = useState(false);
   const [reminders, setReminders] = useState([]); // {id, time: "8:00 AM", message, daily: true}
@@ -334,7 +388,7 @@ export default function App() {
     setNotifPermission(result);
     if (result === "granted") {
       setNotifEnabled(true);
-      sendNotification("🌸 Notifications enabled!", "You'll get reminders for your routines and events!");
+      sendNotification("ðŸŒ¸ Notifications enabled!", "You'll get reminders for your routines and events!");
     }
   };
 
@@ -351,7 +405,7 @@ export default function App() {
         // Check custom reminders
         reminders.forEach(r => {
           if (r.time === currentTimeStr) {
-            sendNotification("🌸 Reminder", r.message);
+            sendNotification("ðŸŒ¸ Reminder", r.message);
           }
         });
         // Check schedule items (notify 5 min before)
@@ -360,7 +414,7 @@ export default function App() {
           if (eventTime) {
             const minutesUntil = (eventTime - now) / 60000;
             if (minutesUntil > 4.5 && minutesUntil < 5.5) {
-              sendNotification(`⏰ Coming up in 5 min`, item.event);
+              sendNotification(`â° Coming up in 5 min`, item.event);
             }
           }
         });
@@ -370,7 +424,7 @@ export default function App() {
           const upcomingCal = calendarEvents.filter(e => parseInt(e.date) >= now.getDate()).slice(0, 3);
           let body = `${todayEvents} things scheduled today.`;
           if (upcomingCal.length > 0) body += ` Upcoming: ${upcomingCal.map(e => e.title).join(", ")}`;
-          sendNotification("🌅 Good morning!", body);
+          sendNotification("ðŸŒ… Good morning!", body);
         }
         lastNotifCheckRef.current = now;
       }
@@ -388,7 +442,7 @@ export default function App() {
     return d;
   };
 
-  // ─── VOICE / SEGUE ─────────────────────────
+  // â”€â”€â”€ VOICE / SEGUE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [voiceMode, setVoiceMode] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(true);
@@ -403,12 +457,12 @@ export default function App() {
   const [segueResults, setSegueResults] = useState([]);
   const [segueLoading, setSegueLoading] = useState(false);
 
-  // ─── AI CHATS ─────────────────────────────
+  // â”€â”€â”€ AI CHATS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [sectionAIChats, setSectionAIChats] = useState({
-    budget: [{ role: "assistant", content: "Hi! 💰 I'm your budget coach. Ask me about saving, debt, or budget tweaks!" }],
-    work: [{ role: "assistant", content: "Hey! 📞 I'm your work coach. Ask me about scripts, objections, or call confidence!" }],
-    health: [{ role: "assistant", content: "Hi! 🌿 I'm your wellness coach. Ask me about stretches, hydration, or quick energy boosts!" }],
-    notes: [{ role: "assistant", content: "Hey! 📝 I'm your notes assistant. Brainstorm or organize ideas!" }],
+    budget: [{ role: "assistant", content: "Hi! ðŸ’° I'm your budget coach. Ask me about saving, debt, or budget tweaks!" }],
+    work: [{ role: "assistant", content: "Hey! ðŸ“ž I'm your work coach. Ask me about scripts, objections, or call confidence!" }],
+    health: [{ role: "assistant", content: "Hi! ðŸŒ¿ I'm your wellness coach. Ask me about stretches, hydration, or quick energy boosts!" }],
+    notes: [{ role: "assistant", content: "Hey! ðŸ“ I'm your notes assistant. Brainstorm or organize ideas!" }],
   });
   const [sectionAIInputs, setSectionAIInputs] = useState({ budget: "", work: "", health: "", notes: "" });
   const [sectionAILoading, setSectionAILoading] = useState({ budget: false, work: false, health: false, notes: false });
@@ -444,55 +498,86 @@ export default function App() {
   const currentScript = scriptType === "inbound" ? inboundScript : outboundScript;
   const setCurrentScript = scriptType === "inbound" ? setInboundScript : setOutboundScript;
 
-  // ─── LOAD USER DATA on login ────────────────────
+  // â”€â”€â”€ LOAD USER DATA on login â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     if (!user) return;
-    setScheduleItems(sortScheduleItems(loadLocal(user.id, "schedule", defaultSchedule)));
-    setCalendarEvents(loadLocal(user.id, "calendar", []));
-    setBudget(loadLocal(user.id, "budget", defaultBudget));
-    setNotes(loadLocal(user.id, "notes", defaultNotes));
-    setObjections(loadLocal(user.id, "objections", defaultObjections));
-    setInboundScript(loadLocal(user.id, "inboundScript", defaultInboundScript));
-    setOutboundScript(loadLocal(user.id, "outboundScript", defaultOutboundScript));
-    setMedsList(loadLocal(user.id, "meds", []));
-    setStars(loadLocal(user.id, "stars", 0));
-    setAppointments(loadLocal(user.id, "appointments", 0));
-    setCallStreak(loadLocal(user.id, "callStreak", 0));
-    setCallLog(loadLocal(user.id, "callLog", []));
-    setWaterGlasses(loadLocal(user.id, "water", 0));
-    setReminders(loadLocal(user.id, "reminders", []));
-    setNotifEnabled(loadLocal(user.id, "notifEnabled", false));
-    const savedRoutineDate = loadLocal(user.id, "routineDate", getLocalDateKey());
-    if (savedRoutineDate === getLocalDateKey()) {
-      setCompletedTasks(loadLocal(user.id, "completedTasks", []));
-    } else {
-      setCompletedTasks([]);
-      saveLocal(user.id, "routineDate", getLocalDateKey());
-      saveLocal(user.id, "completedTasks", []);
-    }
-    setMasterChat([{ role: "assistant", content: `Hey ${user.displayName}! 🌸 I'm your main AI — I can make changes in your app! Try:\n\n• "Add a note about my goals"\n• "Log a water glass"\n• "Add $50 expense for coffee"\n• "Set reminder at 3pm to stretch"\n\nOr just chat! 💕` }]);
+    let cancelled = false;
+    const today = getLocalDateKey();
+
+    const applyUserData = (data) => {
+      setScheduleItems(sortScheduleItems(data.schedule ?? defaultSchedule));
+      setCalendarEvents(data.calendar ?? []);
+      setBudget(data.budget ?? defaultBudget);
+      setNotes(data.notes ?? defaultNotes);
+      setObjections(data.objections ?? defaultObjections);
+      setInboundScript(data.inboundScript ?? defaultInboundScript);
+      setOutboundScript(data.outboundScript ?? defaultOutboundScript);
+      setMedsList(data.meds ?? []);
+      setStars(data.stars ?? 0);
+      setAppointments(data.appointments ?? 0);
+      setCallStreak(data.callStreak ?? 0);
+      setCallLog(data.callLog ?? []);
+      setWaterGlasses(data.water ?? 0);
+      setReminders(data.reminders ?? []);
+      setNotifEnabled(data.notifEnabled ?? false);
+      setCompletedTasks(data.routineDate === today ? (data.completedTasks ?? []) : []);
+    };
+
+    const loadUserData = async () => {
+      setUserDataReady(false);
+      const localData = {
+        schedule: loadLocal(user.id, "schedule", defaultSchedule),
+        calendar: loadLocal(user.id, "calendar", []),
+        budget: loadLocal(user.id, "budget", defaultBudget),
+        notes: loadLocal(user.id, "notes", defaultNotes),
+        objections: loadLocal(user.id, "objections", defaultObjections),
+        inboundScript: loadLocal(user.id, "inboundScript", defaultInboundScript),
+        outboundScript: loadLocal(user.id, "outboundScript", defaultOutboundScript),
+        meds: loadLocal(user.id, "meds", []),
+        stars: loadLocal(user.id, "stars", 0),
+        appointments: loadLocal(user.id, "appointments", 0),
+        callStreak: loadLocal(user.id, "callStreak", 0),
+        callLog: loadLocal(user.id, "callLog", []),
+        water: loadLocal(user.id, "water", 0),
+        reminders: loadLocal(user.id, "reminders", []),
+        notifEnabled: loadLocal(user.id, "notifEnabled", false),
+        routineDate: loadLocal(user.id, "routineDate", today),
+        completedTasks: loadLocal(user.id, "completedTasks", []),
+      };
+      applyUserData(localData);
+
+      const cloudData = await loadCloudData(user.id);
+      if (!cancelled && cloudData) applyUserData({ ...localData, ...cloudData });
+      if (!cancelled) {
+        setUserDataReady(true);
+        setMasterChat([{ role: "assistant", content: `Hey ${user.displayName}! ðŸŒ¸ I'm your main AI â€” I can make changes in your app! Try:\n\nâ€¢ "Add a note about my goals"\nâ€¢ "Log a water glass"\nâ€¢ "Add $50 expense for coffee"\nâ€¢ "Set reminder at 3pm to stretch"\n\nOr just chat! ðŸ’•` }]);
+      }
+    };
+
+    loadUserData();
+    return () => { cancelled = true; };
   }, [user]);
 
-  // ─── SAVE on changes ───────────────────────────
-  useEffect(() => { if (user) saveLocal(user.id, "schedule", scheduleItems); }, [scheduleItems, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "calendar", calendarEvents); }, [calendarEvents, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "budget", budget); }, [budget, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "notes", notes); }, [notes, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "objections", objections); }, [objections, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "inboundScript", inboundScript); }, [inboundScript, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "outboundScript", outboundScript); }, [outboundScript, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "meds", medsList); }, [medsList, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "stars", stars); }, [stars, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "appointments", appointments); }, [appointments, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "callStreak", callStreak); }, [callStreak, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "callLog", callLog); }, [callLog, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "water", waterGlasses); }, [waterGlasses, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "reminders", reminders); }, [reminders, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "notifEnabled", notifEnabled); }, [notifEnabled, user]);
-  useEffect(() => { if (user) saveLocal(user.id, "completedTasks", completedTasks); }, [completedTasks, user]);
+  // â”€â”€â”€ SAVE on changes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "schedule", scheduleItems); }, [scheduleItems, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "calendar", calendarEvents); }, [calendarEvents, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "budget", budget); }, [budget, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "notes", notes); }, [notes, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "objections", objections); }, [objections, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "inboundScript", inboundScript); }, [inboundScript, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "outboundScript", outboundScript); }, [outboundScript, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "meds", medsList); }, [medsList, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "stars", stars); }, [stars, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "appointments", appointments); }, [appointments, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "callStreak", callStreak); }, [callStreak, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "callLog", callLog); }, [callLog, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "water", waterGlasses); }, [waterGlasses, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "reminders", reminders); }, [reminders, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "notifEnabled", notifEnabled); }, [notifEnabled, user, userDataReady]);
+  useEffect(() => { if (user && userDataReady) saveLocal(user.id, "completedTasks", completedTasks); }, [completedTasks, user, userDataReady]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !userDataReady) return;
     const today = getLocalDateKey(currentTime);
     const savedRoutineDate = loadLocal(user.id, "routineDate", today);
     if (savedRoutineDate !== today) {
@@ -501,9 +586,9 @@ export default function App() {
       saveLocal(user.id, "routineDate", today);
       saveLocal(user.id, "completedTasks", []);
     }
-  }, [currentTime, user]);
+  }, [currentTime, user, userDataReady]);
 
-  // ─── VOICE SETUP ───────────────────────
+  // â”€â”€â”€ VOICE SETUP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) { setVoiceSupported(false); return; }
@@ -562,7 +647,7 @@ export default function App() {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         recognitionRef.current.start();
         setIsListening(true); setTranscript(""); transcriptBufferRef.current = "";
-        setLiveCoaching([{ id: Date.now(), status: "on_track", stage: "intro", tip: "I'm listening! 🎤 Start your call naturally.", time: new Date().toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) }]);
+        setLiveCoaching([{ id: Date.now(), status: "on_track", stage: "intro", tip: "I'm listening! ðŸŽ¤ Start your call naturally.", time: new Date().toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) }]);
       } catch (err) { setVoiceSupported(false); }
     }
   };
@@ -584,14 +669,14 @@ export default function App() {
     setSegueLoading(false);
   };
 
-  // ─── EFFECTS ────────────────────
+  // â”€â”€â”€ EFFECTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
     let interval = null;
     if (pomoActive && pomoTime > 0) interval = setInterval(() => setPomoTime(t => t - 1), 1000);
     else if (pomoTime === 0) {
       setPomoActive(false);
-      if (pomoMode === "work") { setPomoMode("break"); setPomoTime(5 * 60); sendNotification("⏰ Break time!", "Great focus session! Take 5."); }
-      else { setPomoMode("work"); setPomoTime(25 * 60); sendNotification("🎯 Back to focus!", "Time to get back to it."); }
+      if (pomoMode === "work") { setPomoMode("break"); setPomoTime(5 * 60); sendNotification("â° Break time!", "Great focus session! Take 5."); }
+      else { setPomoMode("work"); setPomoTime(25 * 60); sendNotification("ðŸŽ¯ Back to focus!", "Time to get back to it."); }
     }
     return () => clearInterval(interval);
   }, [pomoActive, pomoTime, pomoMode]);
@@ -691,7 +776,7 @@ export default function App() {
     try {
       const reply = await askClaude(updatedChat, MASTER_AI, 1000);
       const { cleanReply, actions } = parseAIActionResponse(reply);
-      setMasterChat([...updatedChat, { role: "assistant", content: cleanReply || "Done — I updated that for you." }]);
+      setMasterChat([...updatedChat, { role: "assistant", content: cleanReply || "Done â€” I updated that for you." }]);
       actions.forEach(action => executeAction(action));
     } catch (e) {
       setMasterChat([...updatedChat, { role: "assistant", content: "I could not reach the AI service yet. The built-in test coach should work without a key, so check that netlify/functions/ask-ai.js was uploaded and redeployed." }]);
@@ -731,22 +816,22 @@ export default function App() {
     let actionMsg = "";
     switch (action.type) {
       case "add_note": {
-        const newNote = { id: Date.now(), title: action.data.title || "New Note", emoji: action.data.emoji || "✨", color: colorMap[action.data.color] || palette.lavender, content: action.data.content || "", pinned: false, createdAt: new Date().toISOString() };
+        const newNote = { id: Date.now(), title: action.data.title || "New Note", emoji: action.data.emoji || "âœ¨", color: colorMap[action.data.color] || palette.lavender, content: action.data.content || "", pinned: false, createdAt: new Date().toISOString() };
         setNotes(p => [newNote, ...p]);
-        actionMsg = `📝 Added note "${newNote.title}"`;
+        actionMsg = `ðŸ“ Added note "${newNote.title}"`;
         break;
       }
       case "add_budget": {
         const cat = action.data.category;
         if (budget[cat]) {
           setBudget(p => ({ ...p, [cat]: [...p[cat], { id: Date.now(), category: action.data.name, planned: parseFloat(action.data.planned) || 0, actual: parseFloat(action.data.actual) || 0, dueDate: action.data.dueDate || "", paid: false }] }));
-          actionMsg = `💰 Added "${action.data.name}" to ${cat}`;
+          actionMsg = `ðŸ’° Added "${action.data.name}" to ${cat}`;
         }
         break;
       }
       case "add_schedule":
         setScheduleItems(p => sortScheduleItems([...p, { id: Date.now(), date: String(action.data.date || "").replace(/\D/g, "") || undefined, time: action.data.time, event: action.data.event, type: action.data.type || "work" }]));
-        actionMsg = `📅 Added "${action.data.event}" at ${action.data.time}`;
+        actionMsg = `ðŸ“… Added "${action.data.event}" at ${action.data.time}`;
         break;
       case "add_calendar": {
         let color = palette.mint;
@@ -754,7 +839,7 @@ export default function App() {
         if (action.data.type === "appointment") color = palette.pink;
         const date = String(action.data.date || "").replace(/\D/g, "");
         setCalendarEvents(p => [...p, { id: Date.now(), date, title: action.data.title, type: action.data.type, color }]);
-        actionMsg = `🗓️ Added "${action.data.title}" on May ${action.data.date}`;
+        actionMsg = `ðŸ—“ï¸ Added "${action.data.title}" on May ${action.data.date}`;
         break;
       }
       case "log_call": {
@@ -762,21 +847,21 @@ export default function App() {
         setCallLog(p => [{ id: Date.now(), time: now, result: action.data.result, notes: action.data.notes || "" }, ...p]);
         if (action.data.result === "appointment") { setAppointments(a => a + 1); setCallStreak(s => s + 1); }
         else setCallStreak(0);
-        actionMsg = `📞 Logged ${action.data.result}`;
+        actionMsg = `ðŸ“ž Logged ${action.data.result}`;
         break;
       }
       case "add_water":
         setWaterGlasses(w => w + (action.data.amount || 1));
-        actionMsg = `💧 +${action.data.amount || 1} water`;
+        actionMsg = `ðŸ’§ +${action.data.amount || 1} water`;
         break;
       case "add_appointment":
         setAppointments(a => a + 1);
         setCallStreak(s => s + 1);
-        actionMsg = `📅 +1 appointment!`;
+        actionMsg = `ðŸ“… +1 appointment!`;
         break;
       case "set_reminder":
         setReminders(p => [...p, { id: Date.now(), time: action.data.time, message: action.data.message, daily: true }]);
-        actionMsg = `🔔 Reminder set for ${action.data.time}`;
+        actionMsg = `ðŸ”” Reminder set for ${action.data.time}`;
         break;
     }
     if (actionMsg) {
@@ -904,7 +989,7 @@ export default function App() {
     );
   };
 
-  // ─── AUTH SCREEN ───────────────────────────────
+  // â”€â”€â”€ AUTH SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 relative" style={{background: `linear-gradient(135deg, ${palette.pink}, ${palette.lavender}, ${palette.sky})`, fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif"}}>
@@ -918,7 +1003,7 @@ export default function App() {
 
           <div className="relative">
             <div className="text-center mb-7">
-              <div className="text-5xl mb-2">🌸</div>
+              <div className="text-5xl mb-2">ðŸŒ¸</div>
               <h1 className="text-3xl font-extrabold mb-1" style={{background: `linear-gradient(135deg, ${palette.pinkText}, ${palette.lavenderText})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontFamily: "'Fraunces', serif"}}>{authView === "login" ? "Welcome back!" : "Create account"}</h1>
               <p className="text-sm" style={{color: palette.lavenderText}}>{authView === "login" ? "Log in to your personal space" : "Your own little corner of the internet"}</p>
             </div>
@@ -939,10 +1024,10 @@ export default function App() {
                 <input type="password" placeholder="Password" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} onKeyDown={e => e.key === "Enter" && (authView === "login" ? handleLogin() : handleSignup())} className="w-full pl-10 pr-4 py-3 rounded-2xl text-sm focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.lavender}`, color: "#5C5470"}}/>
               </div>
 
-              {authError && <div className="text-xs font-medium px-3 py-2 rounded-xl" style={{background: palette.pink, color: palette.pinkText}}>⚠️ {authError}</div>}
+              {authError && <div className="text-xs font-medium px-3 py-2 rounded-xl" style={{background: palette.pink, color: palette.pinkText}}>âš ï¸ {authError}</div>}
 
               <button onClick={authView === "login" ? handleLogin : handleSignup} disabled={authLoading} className="w-full py-3.5 rounded-2xl text-sm font-bold text-white shadow-md hover:scale-[1.02] disabled:opacity-50 transition-all" style={{background: `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>
-                {authLoading ? "..." : authView === "login" ? "Log In ✨" : "Create Account 🌸"}
+                {authLoading ? "..." : authView === "login" ? "Log In âœ¨" : "Create Account ðŸŒ¸"}
               </button>
 
               <div className="text-center pt-3">
@@ -953,7 +1038,7 @@ export default function App() {
 
               {!FIREBASE_ENABLED && (
                 <div className="text-center pt-4 mt-4 border-t" style={{borderColor: palette.lavender}}>
-                  <p className="text-[10px] opacity-60" style={{color: palette.lavenderText}}>📱 Demo mode: data saves on this device. Add Firebase config in code for cross-device sync.</p>
+                  <p className="text-[10px] opacity-60" style={{color: palette.lavenderText}}>ðŸ“± Demo mode: data saves on this device. Add Firebase config in code for cross-device sync.</p>
                 </div>
               )}
             </div>
@@ -963,7 +1048,7 @@ export default function App() {
     );
   }
 
-  // ─── MAIN APP (when logged in) ─────────────────
+  // â”€â”€â”€ MAIN APP (when logged in) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const renderSectionAI = ({ section, color, textColor, emoji, name }) => {
     const isOpen = openSectionAI === section;
@@ -1014,7 +1099,7 @@ export default function App() {
     );
   };
 
-  // ─── SETTINGS MODAL ──────────────────────────
+  // â”€â”€â”€ SETTINGS MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const renderSettings = () => (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6 z-50">
       <div className="w-full sm:max-w-md max-h-[88vh] rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden border-2" style={{background: `linear-gradient(180deg, ${palette.bg}, ${palette.bgWarm})`, borderColor: palette.lavenderDeep}}>
@@ -1040,7 +1125,7 @@ export default function App() {
                 <h4 className="font-bold text-sm" style={{color: palette.creamText, fontFamily: "'Fraunces', serif"}}>Notifications</h4>
               </div>
               {notifPermission === "granted" ? (
-                <span className="text-xs font-bold px-2 py-1 rounded-full" style={{background: palette.mint, color: palette.mintText}}>✓ Enabled</span>
+                <span className="text-xs font-bold px-2 py-1 rounded-full" style={{background: palette.mint, color: palette.mintText}}>âœ“ Enabled</span>
               ) : notifPermission === "denied" ? (
                 <span className="text-xs font-bold px-2 py-1 rounded-full" style={{background: palette.pink, color: palette.pinkText}}>Blocked</span>
               ) : (
@@ -1069,22 +1154,22 @@ export default function App() {
                   <input type="text" placeholder="Take meds" value={newReminder.message} onChange={e => setNewReminder({...newReminder, message: e.target.value})} className="flex-grow text-xs p-2 rounded-lg focus:outline-none" style={{background: "white", border: `1px solid ${palette.cream}`}}/>
                   <button onClick={addReminder} className="text-xs px-3 rounded-lg font-bold text-white" style={{background: palette.creamText}}>+</button>
                 </div>
-                <p className="text-[10px] opacity-50 mt-2" style={{color: palette.creamText}}>💡 Format: "8:00 AM" or "3:30 PM"</p>
+                <p className="text-[10px] opacity-50 mt-2" style={{color: palette.creamText}}>ðŸ’¡ Format: "8:00 AM" or "3:30 PM"</p>
               </>
             )}
           </div>
 
           {/* Test notification */}
           {notifPermission === "granted" && (
-            <button onClick={() => sendNotification("🌸 Test reminder", "This is what your reminders will look like!")} className="w-full py-2.5 rounded-2xl text-xs font-bold border-2" style={{background: "white", color: palette.lavenderText, borderColor: palette.lavender}}>
-              Send test notification 🔔
+            <button onClick={() => sendNotification("ðŸŒ¸ Test reminder", "This is what your reminders will look like!")} className="w-full py-2.5 rounded-2xl text-xs font-bold border-2" style={{background: "white", color: palette.lavenderText, borderColor: palette.lavender}}>
+              Send test notification ðŸ””
             </button>
           )}
 
           {/* iPhone tip */}
           <div className="rounded-2xl p-3 text-xs" style={{background: palette.sky, color: palette.skyText}}>
-            <p className="font-bold mb-1">📱 On iPhone:</p>
-            <p className="opacity-90">Add to Home Screen (Safari Share → Add to Home Screen) so notifications work even when the app isn't open!</p>
+            <p className="font-bold mb-1">ðŸ“± On iPhone:</p>
+            <p className="opacity-90">Add to Home Screen (Safari Share â†’ Add to Home Screen) so notifications work even when the app isn't open!</p>
           </div>
 
           {/* Logout */}
@@ -1096,7 +1181,7 @@ export default function App() {
     </div>
   );
 
-  // ─── MASTER AI ──────────────────────────
+  // â”€â”€â”€ MASTER AI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const renderMasterAI = () => (
     <div className="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-6 z-50">
       <div className="w-full sm:max-w-md h-[88vh] sm:h-[640px] rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden border-2" style={{background: `linear-gradient(180deg, ${palette.bg}, ${palette.bgWarm})`, borderColor: palette.lavenderDeep}}>
@@ -1109,7 +1194,7 @@ export default function App() {
               <h3 className="text-base font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>Main AI Assistant</h3>
               <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full animate-pulse" style={{background: palette.mintDeep}}></div>
-                <p className="text-xs font-medium" style={{color: palette.lavenderText}}>Can make changes in your app ✨</p>
+                <p className="text-xs font-medium" style={{color: palette.lavenderText}}>Can make changes in your app âœ¨</p>
               </div>
             </div>
           </div>
@@ -1218,7 +1303,7 @@ export default function App() {
         <div className="rounded-[1.75rem] p-5 shadow-md backdrop-blur-md border-2" style={{background: "rgba(255,255,255,0.7)", borderColor: "rgba(255,255,255,0.9)"}}>
           {sortedScheduleItems.length === 0 ? (
             <div className="text-center py-8">
-              <div className="text-4xl mb-2">📅</div>
+              <div className="text-4xl mb-2">ðŸ“…</div>
               <p className="text-sm font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>No events yet</p>
               <p className="text-xs opacity-60 mt-1" style={{color: palette.lavenderText}}>Tap Edit to add your daily schedule</p>
             </div>
@@ -1287,12 +1372,12 @@ export default function App() {
               </div>
               <div>
                 <h3 className="text-base font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>Live Call Coach</h3>
-                <p className="text-xs font-medium" style={{color: palette.lavenderText}}>{isListening ? "🔴 Listening..." : "Ready to listen"}</p>
+                <p className="text-xs font-medium" style={{color: palette.lavenderText}}>{isListening ? "ðŸ”´ Listening..." : "Ready to listen"}</p>
               </div>
             </div>
             <button onClick={() => setVoiceMode(false)} className="p-2 rounded-full hover:bg-white/40" style={{color: palette.lavenderText}}><X className="w-5 h-5"/></button>
           </div>
-          {!voiceSupported && <div className="text-xs p-3 rounded-xl mb-2 bg-white/80" style={{color: palette.pinkText}}>⚠️ Works best in Safari on iPhone with mic permissions allowed!</div>}
+          {!voiceSupported && <div className="text-xs p-3 rounded-xl mb-2 bg-white/80" style={{color: palette.pinkText}}>âš ï¸ Works best in Safari on iPhone with mic permissions allowed!</div>}
           <button onClick={toggleListening} disabled={!voiceSupported} className="w-full py-3 rounded-2xl font-bold text-white shadow-md flex items-center justify-center gap-2 disabled:opacity-50" style={{background: isListening ? `linear-gradient(135deg, ${palette.pinkDeep}, ${palette.peachDeep})` : `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>
             {isListening ? <><MicOff className="w-4 h-4"/>Stop Listening</> : <><Mic className="w-4 h-4"/>Start Listening</>}
           </button>
@@ -1305,26 +1390,26 @@ export default function App() {
         <div className="flex-grow overflow-y-auto p-4 space-y-3">
           {liveCoaching.length === 0 && !isListening && (
             <div className="text-center py-12">
-              <div className="text-5xl mb-3">🎧</div>
+              <div className="text-5xl mb-3">ðŸŽ§</div>
               <p className="text-sm font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>Ready when you are!</p>
               <p className="text-xs mt-2 opacity-70" style={{color: palette.lavenderText}}>Tap "Start Listening" and I'll guide you through every call.</p>
             </div>
           )}
           {liveCoaching.map(tip => {
             const statusConfig = {
-              on_track: { color: palette.mint, tc: palette.mintText, icon: "✅", label: "On Track" },
-              off_track: { color: palette.peach, tc: palette.peachText, icon: "⚠️", label: "Off Track" },
-              objection: { color: palette.pink, tc: palette.pinkText, icon: "🛡️", label: "Objection" },
-              buying_signal: { color: palette.cream, tc: palette.creamText, icon: "💎", label: "Buying Signal" },
+              on_track: { color: palette.mint, tc: palette.mintText, icon: "âœ…", label: "On Track" },
+              off_track: { color: palette.peach, tc: palette.peachText, icon: "âš ï¸", label: "Off Track" },
+              objection: { color: palette.pink, tc: palette.pinkText, icon: "ðŸ›¡ï¸", label: "Objection" },
+              buying_signal: { color: palette.cream, tc: palette.creamText, icon: "ðŸ’Ž", label: "Buying Signal" },
             };
             const cfg = statusConfig[tip.status] || statusConfig.on_track;
             return (
               <div key={tip.id} className="rounded-2xl p-3.5 shadow-sm border-2" style={{background: `${cfg.color}40`, borderColor: cfg.color}}>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold flex items-center gap-1.5" style={{color: cfg.tc}}><span className="text-sm">{cfg.icon}</span>{cfg.label}{tip.stage && <span className="opacity-60 text-[10px] uppercase tracking-wider">· {tip.stage}</span>}</span>
+                  <span className="text-xs font-bold flex items-center gap-1.5" style={{color: cfg.tc}}><span className="text-sm">{cfg.icon}</span>{cfg.label}{tip.stage && <span className="opacity-60 text-[10px] uppercase tracking-wider">Â· {tip.stage}</span>}</span>
                   <span className="text-[10px] opacity-50" style={{color: cfg.tc}}>{tip.time}</span>
                 </div>
-                {tip.alert && <div className="text-xs italic mb-2 px-2 py-1 rounded-lg bg-white/60" style={{color: cfg.tc}}>⚡ {tip.alert}</div>}
+                {tip.alert && <div className="text-xs italic mb-2 px-2 py-1 rounded-lg bg-white/60" style={{color: cfg.tc}}>âš¡ {tip.alert}</div>}
                 <div className="bg-white/80 rounded-xl p-2.5">
                   <div className="flex items-start gap-1.5">
                     <Lightbulb className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{color: cfg.tc}}/>
@@ -1347,11 +1432,11 @@ export default function App() {
       return (
         <div className="animate-in fade-in duration-500 space-y-5">
           <div className="rounded-3xl p-8 border-2 border-white shadow-md text-center" style={{background: "rgba(255,255,255,0.7)"}}>
-            <div className="text-5xl mb-3">📞</div>
+            <div className="text-5xl mb-3">ðŸ“ž</div>
             <p className="text-sm font-bold mb-2" style={{color: palette.mintText, fontFamily: "'Fraunces', serif"}}>Add your script!</p>
             <p className="text-xs opacity-60" style={{color: palette.mintText}}>Tap below to start building your call script.</p>
             <button onClick={() => {
-              setCurrentScript([{ id: "intro", label: "Intro", color: palette.mint, textColor: palette.mintText, emoji: "👋", lines: [] }]);
+              setCurrentScript([{ id: "intro", label: "Intro", color: palette.mint, textColor: palette.mintText, emoji: "ðŸ‘‹", lines: [] }]);
               setActiveScriptSection("intro");
             }} className="mt-4 px-5 py-2.5 rounded-2xl text-xs font-bold text-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.mintText}, ${palette.skyText})`}}>
               + Start Building
@@ -1408,7 +1493,7 @@ export default function App() {
       );
       if (line.type === "tip") return (
         <div className="flex gap-2 items-start p-3 rounded-2xl border-2" style={{background: palette.cream, borderColor: palette.creamDeep}}>
-          <span className="text-base shrink-0">💛</span>
+          <span className="text-base shrink-0">ðŸ’›</span>
           <p className="text-xs font-medium leading-relaxed flex-grow" style={{color: palette.creamText}}>{line.text}</p>
           <EditButtons/>
         </div>
@@ -1454,7 +1539,7 @@ export default function App() {
           <div className="relative flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md shrink-0" style={{background: "white"}}><Headphones className="w-7 h-7" style={{color: palette.lavenderText}}/></div>
             <div className="flex-grow">
-              <h3 className="text-base font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>Live Call Coach 🎧</h3>
+              <h3 className="text-base font-bold" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>Live Call Coach ðŸŽ§</h3>
               <p className="text-xs mt-0.5" style={{color: palette.lavenderText}}>iPhone will listen + nudge you live</p>
             </div>
             <button onClick={() => setVoiceMode(true)} className="text-white text-sm font-bold px-4 py-2.5 rounded-2xl shadow-md hover:scale-105 shrink-0" style={{background: `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>
@@ -1466,7 +1551,7 @@ export default function App() {
         <div className="grid grid-cols-3 gap-3">
           {[
             {value: appointments, label: "APPTS", sub: "today", color: palette.mint, tc: palette.mintText},
-            {value: callStreak, label: "STREAK", sub: callStreak >= 3 ? "🔥" : "keep going", color: palette.lavender, tc: palette.lavenderText},
+            {value: callStreak, label: "STREAK", sub: callStreak >= 3 ? "ðŸ”¥" : "keep going", color: palette.lavender, tc: palette.lavenderText},
             {value: callLog.length, label: "CALLS", sub: "today", color: palette.pink, tc: palette.pinkText},
           ].map((stat, i) => (
             <div key={i} className="rounded-2xl p-4 text-center shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${stat.color}90, ${stat.color}50)`}}>
@@ -1477,7 +1562,7 @@ export default function App() {
           ))}
         </div>
 
-        {renderSectionAI({ section: "work", color: palette.mint, textColor: palette.mintText, emoji: "📞", name: "Work AI Coach" })}
+        {renderSectionAI({ section: "work", color: palette.mint, textColor: palette.mintText, emoji: "ðŸ“ž", name: "Work AI Coach" })}
 
         <div className="flex gap-2 p-1.5 rounded-2xl shadow-inner" style={{background: "rgba(255,255,255,0.6)"}}>
           <button onClick={() => { setScriptType("inbound"); setActiveScriptSection(inboundScript[0]?.id || "intro"); }} className="flex-1 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5" style={scriptType === "inbound" ? {background: palette.mint, color: palette.mintText, boxShadow: "0 2px 8px rgba(0,0,0,0.08)"} : {color: "#9CA3AF"}}>
@@ -1550,14 +1635,14 @@ export default function App() {
                 {segueResults.map(r => (
                   <div key={r.id} className="rounded-2xl bg-white p-3 shadow-sm border" style={{borderColor: palette.lavender}}>
                     <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5 flex items-center gap-2" style={{color: palette.skyText}}>
-                      <span>📢 CUSTOMER SAID</span><span className="opacity-50">{r.time}</span>
+                      <span>ðŸ“¢ CUSTOMER SAID</span><span className="opacity-50">{r.time}</span>
                       <button onClick={() => setSegueResults(p => p.filter(x => x.id !== r.id))} className="ml-auto p-1 rounded-full" style={{color: palette.pinkText}}><X className="w-3 h-3"/></button>
                     </div>
                     <p className="text-xs italic mb-2.5 pl-2 border-l-2" style={{color: palette.skyText, borderColor: palette.sky}}>"{r.question}"</p>
-                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color: palette.mintText}}>💚 YOU SAY</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{color: palette.mintText}}>ðŸ’š YOU SAY</div>
                     <p className="text-xs leading-relaxed whitespace-pre-wrap" style={{color: "#5C5470"}}>{r.answer}</p>
                     <button onClick={() => {
-                      const note = { id: Date.now(), title: `Segue: ${r.question.slice(0, 30)}`, emoji: "💬", color: palette.lavender, content: `Customer said: "${r.question}"\n\nYou say:\n${r.answer}`, pinned: false, createdAt: new Date().toISOString() };
+                      const note = { id: Date.now(), title: `Segue: ${r.question.slice(0, 30)}`, emoji: "ðŸ’¬", color: palette.lavender, content: `Customer said: "${r.question}"\n\nYou say:\n${r.answer}`, pinned: false, createdAt: new Date().toISOString() };
                       setNotes(p => [note, ...p]);
                       rewardStars(2);
                     }} className="mt-2 text-[10px] font-bold flex items-center gap-1 px-2 py-1 rounded-full" style={{background: palette.mint, color: palette.mintText}}>
@@ -1575,9 +1660,9 @@ export default function App() {
             <h3 className="text-sm font-bold flex items-center mb-3" style={{color: palette.pinkText, fontFamily: "'Fraunces', serif"}}><Phone className="w-4 h-4 mr-2"/>Log a Call</h3>
             <div className="flex gap-2 mb-3">
               {[
-                {v: "appointment", label: "📅 Appt", c: palette.mint, tc: palette.mintText},
-                {v: "callback", label: "📞 Callback", c: palette.cream, tc: palette.creamText},
-                {v: "no", label: "❌ No", c: palette.pink, tc: palette.pinkText},
+                {v: "appointment", label: "ðŸ“… Appt", c: palette.mint, tc: palette.mintText},
+                {v: "callback", label: "ðŸ“ž Callback", c: palette.cream, tc: palette.creamText},
+                {v: "no", label: "âŒ No", c: palette.pink, tc: palette.pinkText},
               ].map(opt => (
                 <button key={opt.v} onClick={() => setNewCallResult(opt.v)} className={`flex-1 py-2.5 rounded-xl text-xs font-bold ${newCallResult === opt.v ? "shadow-md scale-105" : "opacity-50"}`} style={{background: opt.c, color: opt.tc}}>{opt.label}</button>
               ))}
@@ -1597,7 +1682,7 @@ export default function App() {
                 <div className="border-t divide-y max-h-48 overflow-y-auto" style={{borderColor: palette.pink}}>
                   {callLog.map(call => (
                     <div key={call.id} className="flex items-center gap-3 px-4 py-2.5">
-                      <span className="text-lg">{call.result === "appointment" ? "📅" : call.result === "callback" ? "📞" : "❌"}</span>
+                      <span className="text-lg">{call.result === "appointment" ? "ðŸ“…" : call.result === "callback" ? "ðŸ“ž" : "âŒ"}</span>
                       <div className="flex-grow min-w-0">
                         <div className="text-xs font-bold truncate" style={{color: palette.pinkText}}>{call.notes || "No notes"}</div>
                         <div className="text-xs opacity-50" style={{color: palette.pinkText}}>{call.time}</div>
@@ -1632,7 +1717,7 @@ export default function App() {
               <div className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-sm" style={{background: `linear-gradient(135deg, ${palette.peach}, ${palette.pink})`}}><Zap className="w-4 h-4" style={{color: palette.peachText}}/></div>
               <div className="text-left">
                 <div className="text-sm font-bold" style={{color: palette.peachText, fontFamily: "'Fraunces', serif"}}>Objection Handles</div>
-                <div className="text-xs opacity-60" style={{color: palette.peachText}}>Quick comebacks · editable</div>
+                <div className="text-xs opacity-60" style={{color: palette.peachText}}>Quick comebacks Â· editable</div>
               </div>
             </div>
             {objectionMode ? <ChevronUp className="w-4 h-4" style={{color: palette.peachText}}/> : <ChevronDown className="w-4 h-4" style={{color: palette.peachText}}/>}
@@ -1723,11 +1808,11 @@ export default function App() {
             <Plus className="w-3.5 h-3.5"/>New
           </button>
         </div>
-        {renderSectionAI({ section: "notes", color: palette.lavender, textColor: palette.lavenderText, emoji: "📝", name: "Notes AI" })}
+        {renderSectionAI({ section: "notes", color: palette.lavender, textColor: palette.lavenderText, emoji: "ðŸ“", name: "Notes AI" })}
         {showNewNote && (
           <div className="rounded-3xl p-5 shadow-md border-2" style={{background: `linear-gradient(135deg, ${palette.lavender}40, white)`, borderColor: palette.lavender}}>
             <div className="flex gap-2 mb-3">
-              <input type="text" placeholder="✨" value={newNoteEmoji} onChange={e => setNewNoteEmoji(e.target.value)} className="w-14 text-center text-lg rounded-xl px-2 py-2.5 focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`}}/>
+              <input type="text" placeholder="âœ¨" value={newNoteEmoji} onChange={e => setNewNoteEmoji(e.target.value)} className="w-14 text-center text-lg rounded-xl px-2 py-2.5 focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`}}/>
               <input type="text" placeholder="Note title..." value={newNoteTitle} onChange={e => setNewNoteTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && createNote()} className="flex-grow text-sm font-bold rounded-xl px-3 py-2.5 focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`, color: "#5C5470"}}/>
             </div>
             <div className="flex gap-2 items-center mb-4">
@@ -1736,13 +1821,13 @@ export default function App() {
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowNewNote(false)} className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-white/70" style={{color: "#9CA3AF"}}>Cancel</button>
-              <button onClick={createNote} className="flex-[2] py-2.5 rounded-xl text-xs font-bold text-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>Create ✨</button>
+              <button onClick={createNote} className="flex-[2] py-2.5 rounded-xl text-xs font-bold text-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>Create âœ¨</button>
             </div>
           </div>
         )}
         {notes.length === 0 && !showNewNote && (
           <div className="rounded-3xl p-8 border-2 border-white shadow-md text-center" style={{background: "rgba(255,255,255,0.7)"}}>
-            <div className="text-5xl mb-3">📝</div>
+            <div className="text-5xl mb-3">ðŸ“</div>
             <p className="text-sm font-bold mb-2" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>No notes yet</p>
             <p className="text-xs opacity-60" style={{color: palette.lavenderText}}>Tap "New" to create your first one!</p>
           </div>
@@ -1827,7 +1912,7 @@ export default function App() {
             <div className="flex gap-2">
               <input type="number" placeholder="Day" value={newCalEvent.date} onChange={e => setNewCalEvent({...newCalEvent, date: e.target.value})} className="w-20 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}/>
               <select value={newCalEvent.type} onChange={e => setNewCalEvent({...newCalEvent, type: e.target.value})} className="flex-1 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}>
-                <option value="social">Social 💜</option><option value="appointment">Appt 🩷</option><option value="work">Work 🌿</option>
+                <option value="social">Social ðŸ’œ</option><option value="appointment">Appt ðŸ©·</option><option value="work">Work ðŸŒ¿</option>
               </select>
             </div>
             <input type="text" placeholder="Event title..." value={newCalEvent.title} onChange={e => setNewCalEvent({...newCalEvent, title: e.target.value})} className="w-full text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}/>
@@ -1841,7 +1926,7 @@ export default function App() {
                 setNewCalEvent({date: "", title: "", type: "social"});
                 rewardStars(3);
               }
-            }} className="w-full text-white font-bold py-3 rounded-xl text-sm shadow-md" style={{background: `linear-gradient(135deg, ${palette.skyText}, ${palette.mintText})`}}>Save ✨</button>
+            }} className="w-full text-white font-bold py-3 rounded-xl text-sm shadow-md" style={{background: `linear-gradient(135deg, ${palette.skyText}, ${palette.mintText})`}}>Save âœ¨</button>
           </div>
         </div>
       </div>
@@ -1881,7 +1966,7 @@ export default function App() {
         <div className="flex items-center justify-between mb-4">
           <span className="text-4xl font-extrabold" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}>{waterGlasses} <span className="text-base font-medium opacity-60">glasses</span></span>
           <div className="flex gap-2">
-            <button onClick={() => setWaterGlasses(Math.max(0, waterGlasses - 1))} className="w-12 h-12 rounded-full flex items-center justify-center font-bold shadow-sm" style={{background: "white", color: palette.skyText}}>−</button>
+            <button onClick={() => setWaterGlasses(Math.max(0, waterGlasses - 1))} className="w-12 h-12 rounded-full flex items-center justify-center font-bold shadow-sm" style={{background: "white", color: palette.skyText}}>âˆ’</button>
             <button onClick={() => { setWaterGlasses(waterGlasses + 1); rewardStars(2); }} className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.skyText}, ${palette.mintText})`}}>+</button>
           </div>
         </div>
@@ -1889,7 +1974,7 @@ export default function App() {
           {Array.from({length: 8}, (_, i) => <div key={i} className="flex-1 h-3 rounded-full shadow-inner" style={{background: i < waterGlasses ? `linear-gradient(90deg, ${palette.skyDeep}, ${palette.mintDeep})` : "rgba(255,255,255,0.6)"}}></div>)}
         </div>
       </div>
-      {renderSectionAI({ section: "health", color: palette.pink, textColor: palette.pinkText, emoji: "🌿", name: "Wellness AI" })}
+      {renderSectionAI({ section: "health", color: palette.pink, textColor: palette.pinkText, emoji: "ðŸŒ¿", name: "Wellness AI" })}
     </div>
   );
 
@@ -2023,7 +2108,7 @@ export default function App() {
         <h3 className="text-sm font-bold mb-1" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>{title}</h3>
         <p className="text-xs mb-4 opacity-60" style={{color: palette.lavenderText}}>{subtitle}</p>
         {total === 0 ? (
-          <div className="text-center py-7"><div className="text-3xl mb-2">✨</div><p className="text-xs font-medium" style={{color: palette.lavenderText}}>Add amounts to see this chart.</p></div>
+          <div className="text-center py-7"><div className="text-3xl mb-2">âœ¨</div><p className="text-xs font-medium" style={{color: palette.lavenderText}}>Add amounts to see this chart.</p></div>
         ) : (
           <div className="flex items-center gap-5 flex-col sm:flex-row">
             <div className="shrink-0"><PieChart data={data} size={150}/></div>
@@ -2068,9 +2153,9 @@ export default function App() {
           </div>
         </div>
         <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: "rgba(255,255,255,0.85)"}}>
-          <h3 className="text-sm font-bold flex items-center mb-4" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}><span className="mr-2">🥧</span>Where Your Money Goes</h3>
+          <h3 className="text-sm font-bold flex items-center mb-4" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}><span className="mr-2">ðŸ¥§</span>Where Your Money Goes</h3>
           {totalNeeded === 0 ? (
-            <div className="text-center py-8"><div className="text-4xl mb-2">✨</div><p className="text-xs font-medium" style={{color: palette.lavenderText}}>Add needed amounts to see your breakdown!</p></div>
+            <div className="text-center py-8"><div className="text-4xl mb-2">âœ¨</div><p className="text-xs font-medium" style={{color: palette.lavenderText}}>Add needed amounts to see your breakdown!</p></div>
           ) : (
             <div className="flex items-center gap-5 flex-col sm:flex-row">
               <div className="shrink-0"><PieChart data={pieData} size={180}/></div>
@@ -2136,7 +2221,7 @@ export default function App() {
             </div>
           )}
         </div>
-        {renderSectionAI({ section: "budget", color: palette.cream, textColor: palette.creamText, emoji: "💰", name: "Budget AI Coach" })}
+        {renderSectionAI({ section: "budget", color: palette.cream, textColor: palette.creamText, emoji: "ðŸ’°", name: "Budget AI Coach" })}
         <div className="space-y-4">{tableConfigs.map(cfg => <div key={cfg.key}>{renderTable(cfg)}</div>)}</div>
       </div>
     );
@@ -2166,7 +2251,7 @@ export default function App() {
           </div>
         </div>
         <button onClick={() => completeTask(task.id)} className="w-full text-white font-bold text-lg py-5 rounded-3xl flex items-center justify-center shadow-xl mb-6" style={{background: `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText}, ${palette.peachText})`}}>
-          {isLast ? "Finish 🎉" : "Done! Next"}<ChevronRight className="w-5 h-5 ml-2"/>
+          {isLast ? "Finish ðŸŽ‰" : "Done! Next"}<ChevronRight className="w-5 h-5 ml-2"/>
         </button>
       </div>
     );
@@ -2196,9 +2281,9 @@ export default function App() {
       <header className="px-5 pt-7 pb-3 shadow-sm sticky top-0 z-40 backdrop-blur-xl border-b" style={{background: "rgba(255,249,245,0.85)", borderColor: "rgba(255,255,255,0.5)"}}>
         <div className="flex justify-between items-center mb-4">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight" style={{background: `linear-gradient(135deg, ${palette.pinkText}, ${palette.lavenderText}, ${palette.skyText})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontFamily: "'Fraunces', serif"}}>Hi, {user.displayName} 🌸</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight" style={{background: `linear-gradient(135deg, ${palette.pinkText}, ${palette.lavenderText}, ${palette.skyText})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", fontFamily: "'Fraunces', serif"}}>Hi, {user.displayName} ðŸŒ¸</h1>
             <p className="font-bold text-xs mt-0.5 flex items-center" style={{color: palette.lavenderText}}>
-              <Clock className="w-3 h-3 mr-1"/>{currentTime.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} · {currentTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+              <Clock className="w-3 h-3 mr-1"/>{currentTime.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} Â· {currentTime.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
             </p>
           </div>
           <div className="flex gap-2">
