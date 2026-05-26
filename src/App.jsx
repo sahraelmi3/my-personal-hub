@@ -96,7 +96,7 @@ const MASTER_AI = `You are the user's main AI assistant with power to make chang
 You can perform actions by including action blocks. The app will hide these blocks from the user and run them.
 - add_note: {"title": "...", "emoji": "...", "color": "pink|mint|lavender|sky|cream|peach", "content": "..."}
 - add_budget: {"category": "income|expense|bills|debt|saving", "name": "...", "planned": 0, "actual": 0} where planned means needed/expected/goal and actual means spent/received/paid/saved
-- add_schedule: {"time": "8:00 AM", "event": "...", "type": "work|break|routine|finish"}
+- add_schedule: {"date": "15", "time": "8:00 AM", "event": "...", "type": "work|break|routine|finish"}
 - add_calendar: {"date": "15", "title": "...", "type": "social|appointment|work"}
 - log_call: {"result": "appointment|callback|no", "notes": "..."}
 - add_water: {"amount": 1}
@@ -107,7 +107,7 @@ Format:
 \`\`\`action
 {"type": "add_note", "data": {"title": "...", ...}}
 \`\`\`
-For multiple actions, include multiple action blocks. Do not use \`\`\`json for app actions. Keep the visible response 1-2 friendly sentences and never describe the hidden JSON.`;
+For appointments or dated events, include BOTH add_calendar and add_schedule with the same date. For multiple actions, include multiple action blocks. Do not use \`\`\`json for app actions. Keep the visible response 1-2 friendly sentences and never describe the hidden JSON.`;
 const LISTENING_SYSTEM = `You are an AI sales coach listening live. Script flow: Intro → Qualify → Needs → Commit → Value of Visit → Close → Button-Up.
 Respond ONLY in JSON: {"status": "on_track" | "off_track" | "objection" | "buying_signal", "stage": "intro|qualify|needs|transition|vov|close|buttonup|unknown", "tip": "ONE specific sentence to say next", "alert": "brief alert if needed"}
 Keep tips under 20 words.`;
@@ -262,6 +262,7 @@ export default function App() {
   const [waterGlasses, setWaterGlasses] = useState(0);
   const [medsList, setMedsList] = useState([]);
   const [scheduleItems, setScheduleItems] = useState([]);
+  const [selectedPlanDate, setSelectedPlanDate] = useState(new Date().getDate());
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [newScheduleItem, setNewScheduleItem] = useState({ time: "", event: "", type: "work" });
   const [calendarEvents, setCalendarEvents] = useState([]);
@@ -730,7 +731,7 @@ export default function App() {
         break;
       }
       case "add_schedule":
-        setScheduleItems(p => sortScheduleItems([...p, { id: Date.now(), time: action.data.time, event: action.data.event, type: action.data.type || "work" }]));
+        setScheduleItems(p => sortScheduleItems([...p, { id: Date.now(), date: String(action.data.date || "").replace(/\D/g, "") || undefined, time: action.data.time, event: action.data.event, type: action.data.type || "work" }]));
         actionMsg = `📅 Added "${action.data.event}" at ${action.data.time}`;
         break;
       case "add_calendar": {
@@ -1156,7 +1157,17 @@ export default function App() {
   const renderTimeline = () => {
     const morningProgress = Math.round((completedTasks.filter(id => id < 100).length / morningRoutine.length) * 100) || 0;
     const nightProgress = Math.round((completedTasks.filter(id => id > 100).length / nightRoutine.length) * 100) || 0;
-    const sortedScheduleItems = sortScheduleItems(scheduleItems);
+    const selectedDateObj = new Date(currentTime.getFullYear(), currentTime.getMonth(), selectedPlanDate);
+    const selectedDateLabel = selectedDateObj.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
+    const selectedDateString = String(selectedPlanDate);
+    const scheduleForSelectedDay = scheduleItems.filter(item => !item.date || String(parseInt(item.date)) === selectedDateString);
+    const calendarForSelectedDay = calendarEvents
+      .filter(ev => String(parseInt(ev.date)) === selectedDateString)
+      .filter(ev => !scheduleForSelectedDay.some(item => String(item.event || "").toLowerCase() === String(ev.title || "").toLowerCase()));
+    const sortedScheduleItems = sortScheduleItems([
+      ...scheduleForSelectedDay,
+      ...calendarForSelectedDay.map(ev => ({ id: `cal-${ev.id}`, date: ev.date, time: "All day", event: ev.title, type: ev.type || "routine", fromCalendar: true })),
+    ]);
     const dotColor = (type) => {
       if (type === "break") return palette.cream;
       if (type === "routine") return palette.peach;
@@ -1182,10 +1193,13 @@ export default function App() {
         </div>
 
         <div className="flex justify-between items-center">
-          <h3 className="text-base font-bold flex items-center" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}><Clock className="w-4 h-4 mr-2"/>Today's Plan</h3>
-          <button onClick={() => setIsEditingSchedule(!isEditingSchedule)} className="text-xs font-bold flex items-center gap-1 px-3 py-1.5 rounded-full" style={{background: palette.lavender, color: palette.lavenderText}}>
-            <Edit2 className="w-3 h-3"/>{isEditingSchedule ? "Done" : "Edit"}
-          </button>
+          <h3 className="text-base font-bold flex items-center" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}><Clock className="w-4 h-4 mr-2"/>{selectedDateLabel} Plan</h3>
+          <div className="flex gap-2">
+            <button onClick={() => setSelectedPlanDate(currentTime.getDate())} className="text-xs font-bold px-3 py-1.5 rounded-full" style={{background: palette.sky, color: palette.skyText}}>Today</button>
+            <button onClick={() => setIsEditingSchedule(!isEditingSchedule)} className="text-xs font-bold flex items-center gap-1 px-3 py-1.5 rounded-full" style={{background: palette.lavender, color: palette.lavenderText}}>
+              <Edit2 className="w-3 h-3"/>{isEditingSchedule ? "Done" : "Edit"}
+            </button>
+          </div>
         </div>
         <div className="rounded-[1.75rem] p-5 shadow-md backdrop-blur-md border-2" style={{background: "rgba(255,255,255,0.7)", borderColor: "rgba(255,255,255,0.9)"}}>
           {sortedScheduleItems.length === 0 ? (
@@ -1204,7 +1218,7 @@ export default function App() {
                     <div className="text-xs font-bold uppercase tracking-wider mb-0.5" style={{color: palette.lavenderText}}>{item.time}</div>
                     <div className={`text-sm font-medium ${item.type === "break" ? "px-3 py-1.5 rounded-xl inline-block" : ""}`} style={item.type === "break" ? {background: palette.cream, color: palette.creamText, fontWeight: 700} : {color: "#5C5470"}}>{item.event}</div>
                   </div>
-                  {isEditingSchedule && <button onClick={() => setScheduleItems(scheduleItems.filter(i => i.id !== item.id))} className="p-2 ml-2 rounded-full hover:bg-pink-50" style={{color: palette.pinkText}}><Trash2 className="w-4 h-4"/></button>}
+                    {isEditingSchedule && !item.fromCalendar && <button onClick={() => setScheduleItems(scheduleItems.filter(i => i.id !== item.id))} className="p-2 ml-2 rounded-full hover:bg-pink-50" style={{color: palette.pinkText}}><Trash2 className="w-4 h-4"/></button>}
                 </div>
               ))}
             </div>
@@ -1219,7 +1233,7 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                 <input type="text" placeholder="Event description" value={newScheduleItem.event} onChange={e => setNewScheduleItem({...newScheduleItem, event: e.target.value})} className="flex-[3] text-sm p-2.5 rounded-xl focus:outline-none" style={{background: palette.bg, border: `1.5px solid ${palette.lavender}`}}/>
-                <button onClick={() => { if (newScheduleItem.time && newScheduleItem.event) { setScheduleItems(sortScheduleItems([...scheduleItems, {...newScheduleItem, id: Date.now()}])); setNewScheduleItem({time: "", event: "", type: "work"}); } }} className="flex-1 rounded-xl text-sm font-bold flex justify-center items-center shadow-sm" style={{background: palette.mintDeep, color: palette.mintText}}>
+                <button onClick={() => { if (newScheduleItem.time && newScheduleItem.event) { setScheduleItems(sortScheduleItems([...scheduleItems, {...newScheduleItem, date: String(selectedPlanDate), id: Date.now()}])); setNewScheduleItem({time: "", event: "", type: "work"}); } }} className="flex-1 rounded-xl text-sm font-bold flex justify-center items-center shadow-sm" style={{background: palette.mintDeep, color: palette.mintText}}>
                   <Plus className="w-4 h-4 mr-1"/>Add
                 </button>
               </div>
@@ -1767,11 +1781,12 @@ export default function App() {
               if (!day) return <div key={`b-${idx}`} className="h-14"></div>;
               const dayEvents = calendarEvents.filter(ev => parseInt(ev.date) === day);
               const isToday = day === currentTime.getDate();
+              const isSelected = day === selectedPlanDate;
               return (
-                <div key={`d-${day}`} className="h-14 rounded-2xl flex flex-col items-center justify-start py-1.5 border-2" style={isToday ? {background: `linear-gradient(135deg, ${palette.sky}, ${palette.lavender})`, borderColor: palette.skyDeep} : dayEvents.length > 0 ? {background: dayEvents[0].color, borderColor: "white", opacity: 0.7} : {background: "white", borderColor: "rgba(255,255,255,0.5)"}}>
-                  <span className="text-xs font-bold" style={{color: isToday ? palette.skyText : "#5C5470"}}>{day}</span>
+                <button key={`d-${day}`} onClick={() => { setSelectedPlanDate(day); setActiveTab("timeline"); }} className="h-14 rounded-2xl flex flex-col items-center justify-start py-1.5 border-2" style={isSelected ? {background: `linear-gradient(135deg, ${palette.peach}, ${palette.pink})`, borderColor: palette.peachDeep} : isToday ? {background: `linear-gradient(135deg, ${palette.sky}, ${palette.lavender})`, borderColor: palette.skyDeep} : dayEvents.length > 0 ? {background: dayEvents[0].color, borderColor: "white", opacity: 0.7} : {background: "white", borderColor: "rgba(255,255,255,0.5)"}}>
+                  <span className="text-xs font-bold" style={{color: isSelected ? palette.peachText : isToday ? palette.skyText : "#5C5470"}}>{day}</span>
                   <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center px-1">{dayEvents.map(ev => <div key={ev.id} className="w-1.5 h-1.5 rounded-full bg-white"></div>)}</div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -1779,7 +1794,7 @@ export default function App() {
         {calendarEvents.length > 0 && (
           <div className="space-y-2">
             {calendarEvents.map(ev => (
-              <div key={ev.id} className="rounded-2xl p-3 flex items-center gap-3 shadow-sm border-2 border-white" style={{background: `${ev.color}80`}}>
+              <div key={ev.id} onClick={() => { setSelectedPlanDate(parseInt(ev.date)); setActiveTab("timeline"); }} className="rounded-2xl p-3 flex items-center gap-3 shadow-sm border-2 border-white cursor-pointer" style={{background: `${ev.color}80`}}>
                 <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center shadow-sm" style={{background: "white"}}>
                   <span className="text-sm font-bold" style={{color: "#5C5470"}}>{ev.date}</span>
                 </div>
@@ -1787,7 +1802,7 @@ export default function App() {
                   <div className="text-sm font-bold" style={{color: "#5C5470", fontFamily: "'Fraunces', serif"}}>{ev.title}</div>
                   <div className="text-xs opacity-60 capitalize" style={{color: "#5C5470"}}>{ev.type}</div>
                 </div>
-                <button onClick={() => deleteCalendarEvent(ev.id)} className="p-2 rounded-full" style={{color: palette.pinkText}}><Trash2 className="w-3.5 h-3.5"/></button>
+                <button onClick={(e) => { e.stopPropagation(); deleteCalendarEvent(ev.id); }} className="p-2 rounded-full" style={{color: palette.pinkText}}><Trash2 className="w-3.5 h-3.5"/></button>
               </div>
             ))}
           </div>
@@ -1808,6 +1823,7 @@ export default function App() {
                 if (newCalEvent.type === "social") color = palette.lavender;
                 if (newCalEvent.type === "appointment") color = palette.pink;
                 setCalendarEvents([...calendarEvents, {...newCalEvent, id: Date.now(), color}]);
+                setSelectedPlanDate(parseInt(newCalEvent.date));
                 setNewCalEvent({date: "", title: "", type: "social"});
                 rewardStars(3);
               }
@@ -2209,3 +2225,4 @@ export default function App() {
     </div>
   );
 }
+
