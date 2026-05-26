@@ -148,6 +148,14 @@ const sortScheduleItems = (items) =>
   });
 
 const moneyValue = (value) => parseFloat(value) || 0;
+const formatMoney = (value) => `$${moneyValue(value).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+const formatDateLabel = (dateString) => {
+  if (!dateString) return "";
+  const [year, month, day] = String(dateString).split("-").map(Number);
+  if (!year || !month || !day) return dateString;
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+};
+const dateSortValue = (dateString) => dateString ? new Date(`${dateString}T00:00:00`).getTime() : Number.MAX_SAFE_INTEGER;
 
 const defaultBudget = {
   income: [],
@@ -260,14 +268,15 @@ export default function App() {
   const [newCalEvent, setNewCalEvent] = useState({ date: "", title: "", type: "social" });
   const [budget, setBudget] = useState(defaultBudget);
   const [newBudgetItems, setNewBudgetItems] = useState({
-    income: { category: "", planned: "", actual: "" },
-    expense: { category: "", planned: "", actual: "" },
-    bills: { category: "", planned: "", actual: "", paid: false },
-    debt: { category: "", planned: "", actual: "", paid: false },
-    saving: { category: "", planned: "", actual: "" },
+    income: { category: "", planned: "", actual: "", dueDate: "" },
+    expense: { category: "", planned: "", actual: "", dueDate: "" },
+    bills: { category: "", planned: "", actual: "", dueDate: "", paid: false },
+    debt: { category: "", planned: "", actual: "", dueDate: "", paid: false },
+    saving: { category: "", planned: "", actual: "", dueDate: "" },
   });
   const [editingBudgetItem, setEditingBudgetItem] = useState(null);
-  const [budgetEditValues, setBudgetEditValues] = useState({ category: "", planned: "", actual: "" });
+  const [budgetEditValues, setBudgetEditValues] = useState({ category: "", planned: "", actual: "", dueDate: "" });
+  const [savingContributions, setSavingContributions] = useState({});
   const [notes, setNotes] = useState([]);
   const [editingNote, setEditingNote] = useState(null);
   const [newNoteTitle, setNewNoteTitle] = useState("");
@@ -640,7 +649,9 @@ export default function App() {
         };
         return acc;
       }, {});
-      context = `\n\nCurrent budget uses Need for planned money and Actual for what happened. Income expected $${totals.income.needed}, received $${totals.income.actual}. Needs: expenses $${totals.expense.needed}, bills $${totals.bills.needed}, debt $${totals.debt.needed}, savings goal $${totals.saving.needed}. Actuals: expenses $${totals.expense.actual}, bills $${totals.bills.actual}, debt $${totals.debt.actual}, saved $${totals.saving.actual}.`;
+      const savingsSummary = budget.saving.map(goal => `${goal.category}: saved $${moneyValue(goal.actual)} of $${moneyValue(goal.planned)}${goal.dueDate ? ` by ${goal.dueDate}` : ""}`).join("; ") || "No savings goals yet.";
+      const dueSummary = ["bills", "debt", "expense"].flatMap(k => budget[k].map(item => `${item.category}: need $${moneyValue(item.planned)}${item.dueDate ? ` due ${item.dueDate}` : ""}`)).join("; ") || "No due dates yet.";
+      context = `\n\nCurrent budget uses Need for planned money and Actual for what happened. Income expected $${totals.income.needed}, received $${totals.income.actual}. Needs: expenses $${totals.expense.needed}, bills $${totals.bills.needed}, debt $${totals.debt.needed}, savings goal $${totals.saving.needed}. Actuals: expenses $${totals.expense.actual}, bills $${totals.bills.actual}, debt $${totals.debt.actual}, saved $${totals.saving.actual}. Savings goals: ${savingsSummary}. Due items: ${dueSummary}.`;
     } else if (section === "work") {
       context = `\n\nToday: ${appointments} appointments, ${callLog.length} calls, streak: ${callStreak}.`;
     } else if (section === "health") {
@@ -746,21 +757,29 @@ export default function App() {
 
   const sumBudget = (key, field) => budget[key].reduce((a, i) => a + (parseFloat(i[field]) || 0), 0);
   const toggleBudgetPaid = (key, id) => setBudget(p => ({ ...p, [key]: p[key].map(item => item.id === id ? { ...item, paid: !item.paid } : item) }));
+  const emptyBudgetItem = (key) => ({ category: "", planned: "", actual: "", dueDate: "", paid: key === "bills" || key === "debt" ? false : undefined });
   const addBudgetItem = (key) => {
     const ni = newBudgetItems[key];
     if (ni.category) {
       setBudget(p => ({ ...p, [key]: [...p[key], { ...ni, id: Date.now() }] }));
-      setNewBudgetItems(p => ({ ...p, [key]: { category: "", planned: "", actual: "", paid: false } }));
+      setNewBudgetItems(p => ({ ...p, [key]: emptyBudgetItem(key) }));
       rewardStars(2);
     }
   };
   const deleteBudgetItem = (key, id) => setBudget(p => ({ ...p, [key]: p[key].filter(item => item.id !== id) }));
-  const startEditBudgetItem = (key, item) => { setEditingBudgetItem({ key, id: item.id }); setBudgetEditValues({ category: item.category, planned: item.planned, actual: item.actual }); };
+  const startEditBudgetItem = (key, item) => { setEditingBudgetItem({ key, id: item.id }); setBudgetEditValues({ category: item.category, planned: item.planned, actual: item.actual, dueDate: item.dueDate || "" }); };
   const saveEditBudgetItem = () => {
     if (!editingBudgetItem) return;
     const { key, id } = editingBudgetItem;
-    setBudget(p => ({ ...p, [key]: p[key].map(item => item.id === id ? { ...item, category: budgetEditValues.category, planned: parseFloat(budgetEditValues.planned) || 0, actual: parseFloat(budgetEditValues.actual) || 0 } : item) }));
+    setBudget(p => ({ ...p, [key]: p[key].map(item => item.id === id ? { ...item, category: budgetEditValues.category, planned: parseFloat(budgetEditValues.planned) || 0, actual: parseFloat(budgetEditValues.actual) || 0, dueDate: budgetEditValues.dueDate || "" } : item) }));
     setEditingBudgetItem(null);
+  };
+  const addSavingContribution = (id) => {
+    const amount = moneyValue(savingContributions[id]);
+    if (amount <= 0) return;
+    setBudget(p => ({ ...p, saving: p.saving.map(item => item.id === id ? { ...item, actual: moneyValue(item.actual) + amount } : item) }));
+    setSavingContributions(p => ({ ...p, [id]: "" }));
+    rewardStars(2);
   };
 
   const createNote = () => {
@@ -1835,40 +1854,59 @@ export default function App() {
       savingActual: sumBudget("saving", "actual"),
     };
     const incomeAvailable = totals.incomeActual || totals.incomeNeeded;
+    const paycheckRows = [...budget.income].sort((a, b) => dateSortValue(a.dueDate) - dateSortValue(b.dueDate));
+    const latestPaycheck = [...paycheckRows].reverse().find(i => moneyValue(i.actual) || moneyValue(i.planned));
+    const paycheckAmount = latestPaycheck ? (moneyValue(latestPaycheck.actual) || moneyValue(latestPaycheck.planned)) : incomeAvailable;
+    const savingsGoals = [...budget.saving].sort((a, b) => dateSortValue(a.dueDate) - dateSortValue(b.dueDate));
     const pieData = [
       { label: "Expenses Needed", value: totals.expenseNeeded, color: palette.peachDeep, tc: palette.peachText },
       { label: "Bills Needed", value: totals.billsNeeded, color: palette.lavenderDeep, tc: palette.lavenderText },
       { label: "Debt Needed", value: totals.debtNeeded, color: palette.pinkDeep, tc: palette.pinkText },
       { label: "Savings Goal", value: totals.savingNeeded, color: palette.skyDeep, tc: palette.skyText },
     ].filter(d => d.value > 0);
+    const actualPieData = [
+      { label: "Expenses Spent", value: totals.expenseActual, color: palette.peachDeep, tc: palette.peachText },
+      { label: "Bills Paid", value: totals.billsActual, color: palette.lavenderDeep, tc: palette.lavenderText },
+      { label: "Debt Paid", value: totals.debtActual, color: palette.pinkDeep, tc: palette.pinkText },
+      { label: "Saved", value: totals.savingActual, color: palette.skyDeep, tc: palette.skyText },
+    ].filter(d => d.value > 0);
+    const savingsPieData = savingsGoals.map((goal, idx) => ({
+      label: goal.category,
+      value: moneyValue(goal.actual),
+      color: [palette.skyDeep, palette.mintDeep, palette.lavenderDeep, palette.pinkDeep, palette.peachDeep][idx % 5],
+      tc: [palette.skyText, palette.mintText, palette.lavenderText, palette.pinkText, palette.peachText][idx % 5],
+    })).filter(d => d.value > 0);
     const totalNeeded = totals.expenseNeeded + totals.billsNeeded + totals.debtNeeded + totals.savingNeeded;
     const totalActualOut = totals.expenseActual + totals.billsActual + totals.debtActual + totals.savingActual;
     const remaining = incomeAvailable - totalNeeded;
+    const actualLeft = incomeAvailable - totalActualOut;
     const tableConfigs = [
-      {title: "Income", key: "income", color: palette.mint, tc: palette.mintText, showPaid: false},
-      {title: "Savings", key: "saving", color: palette.sky, tc: palette.skyText, showPaid: false},
+      {title: "Biweekly Paycheck Income", key: "income", color: palette.mint, tc: palette.mintText, showPaid: false},
+      {title: "Savings Goals", key: "saving", color: palette.sky, tc: palette.skyText, showPaid: false},
       {title: "Expenses", key: "expense", color: palette.peach, tc: palette.peachText, showPaid: false},
       {title: "Bills", key: "bills", color: palette.lavender, tc: palette.lavenderText, showPaid: true},
       {title: "Debt", key: "debt", color: palette.pink, tc: palette.pinkText, showPaid: true},
     ];
     const getBudgetLabels = (key) => {
-      if (key === "income") return { planned: "EXPECTED", actual: "RECEIVED" };
-      if (key === "saving") return { planned: "GOAL", actual: "SAVED" };
-      return { planned: "NEEDED", actual: "SPENT" };
+      if (key === "income") return { name: "PAYCHECK", date: "PAY DATE", planned: "EXPECTED", actual: "RECEIVED" };
+      if (key === "saving") return { name: "GOAL", date: "SAVE BY", planned: "TARGET", actual: "SAVED" };
+      return { name: "CATEGORY", date: "DUE", planned: "NEEDED", actual: "SPENT" };
     };
 
     const renderTable = ({title, key, color, tc, showPaid}) => {
       const labels = getBudgetLabels(key);
+      const rows = [...budget[key]].sort((a, b) => dateSortValue(a.dueDate) - dateSortValue(b.dueDate));
       return (
       <div className="rounded-3xl shadow-md border-2 border-white overflow-hidden">
         <div className="p-3 border-b text-center" style={{background: color, borderColor: color}}>
           <h4 className="text-xs font-bold uppercase tracking-wider" style={{color: tc, fontFamily: "'Fraunces', serif"}}>{title}</h4>
         </div>
-        <div className="bg-white/80">
-          <table className="w-full text-left text-xs">
+        <div className="bg-white/80 overflow-x-auto">
+          <table className="w-full min-w-[660px] text-left text-xs">
             <thead style={{background: `${color}30`}}>
               <tr style={{color: tc}}>
-                <th className="p-2 pl-3 font-bold tracking-wider">CATEGORY</th>
+                <th className="p-2 pl-3 font-bold tracking-wider">{labels.name}</th>
+                <th className="p-2 font-bold">{labels.date}</th>
                 <th className="p-2 font-bold">{labels.planned}</th>
                 <th className="p-2 font-bold">{labels.actual}</th>
                 {showPaid && <th className="p-2 font-bold text-center">PAID</th>}
@@ -1876,12 +1914,13 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {budget[key].map(item => {
+              {rows.map(item => {
                 const isEditing = editingBudgetItem?.key === key && editingBudgetItem?.id === item.id;
                 if (isEditing) {
                   return (
                     <tr key={item.id} className="border-t" style={{borderColor: `${color}50`, background: `${color}30`}}>
                       <td className="p-1.5 pl-2"><input type="text" value={budgetEditValues.category} onChange={e => setBudgetEditValues({...budgetEditValues, category: e.target.value})} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1.5px solid ${tc}`}}/></td>
+                      <td className="p-1.5"><input type="date" value={budgetEditValues.dueDate || ""} onChange={e => setBudgetEditValues({...budgetEditValues, dueDate: e.target.value})} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1.5px solid ${tc}`}}/></td>
                       <td className="p-1.5"><input type="number" value={budgetEditValues.planned} onChange={e => setBudgetEditValues({...budgetEditValues, planned: e.target.value})} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1.5px solid ${tc}`}}/></td>
                       <td className="p-1.5"><input type="number" value={budgetEditValues.actual} onChange={e => setBudgetEditValues({...budgetEditValues, actual: e.target.value})} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1.5px solid ${tc}`}}/></td>
                       {showPaid && <td></td>}
@@ -1891,26 +1930,29 @@ export default function App() {
                 }
                 return (
                   <tr key={item.id} className="border-t" style={{borderColor: `${color}50`}}>
-                    <td className="p-2 pl-3 font-bold uppercase truncate max-w-[100px]" style={{color: tc}}>{item.category}</td>
-                    <td className="p-2 opacity-70" style={{color: tc}}>${item.planned}</td>
-                    <td className="p-2 opacity-70" style={{color: tc}}>${item.actual}</td>
+                    <td className="p-2 pl-3 font-bold uppercase truncate max-w-[150px]" style={{color: tc}}>{item.category}</td>
+                    <td className="p-2 font-bold" style={{color: tc}}>{formatDateLabel(item.dueDate) || "-"}</td>
+                    <td className="p-2 opacity-70" style={{color: tc}}>{formatMoney(item.planned)}</td>
+                    <td className="p-2 opacity-70" style={{color: tc}}>{formatMoney(item.actual)}</td>
                     {showPaid && <td className="p-2"><div className="flex justify-center"><button onClick={() => toggleBudgetPaid(key, item.id)} className="w-5 h-5 rounded-md flex items-center justify-center" style={{background: item.paid ? tc : `${color}80`, color: "white"}}>{item.paid && <CheckCircle2 className="w-4 h-4"/>}</button></div></td>}
                     <td className="p-2"><div className="flex gap-1 justify-center"><button onClick={() => startEditBudgetItem(key, item)} className="p-1 rounded-md" style={{color: tc}}><Edit2 className="w-3 h-3"/></button><button onClick={() => deleteBudgetItem(key, item.id)} className="p-1 rounded-md" style={{color: palette.pinkText}}><Trash2 className="w-3 h-3"/></button></div></td>
                   </tr>
                 );
               })}
               <tr style={{background: `${color}20`}}>
-                <td className="p-1.5 pl-2"><input type="text" placeholder="Add..." value={newBudgetItems[key].category} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], category: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
-                <td className="p-1.5"><input type="number" placeholder={labels.planned === "NEEDED" ? "Need $" : "$0"} value={newBudgetItems[key].planned} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], planned: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
-                <td className="p-1.5"><input type="number" placeholder={labels.actual === "SPENT" ? "Spent $" : "$0"} value={newBudgetItems[key].actual} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], actual: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
+                <td className="p-1.5 pl-2"><input type="text" placeholder={key === "saving" ? "Trip, car..." : key === "income" ? "Paycheck..." : "Add..."} value={newBudgetItems[key].category} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], category: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
+                <td className="p-1.5"><input type="date" value={newBudgetItems[key].dueDate || ""} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], dueDate: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
+                <td className="p-1.5"><input type="number" placeholder={labels.planned === "NEEDED" ? "Need $" : labels.planned === "TARGET" ? "Target $" : "Expected $"} value={newBudgetItems[key].planned} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], planned: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
+                <td className="p-1.5"><input type="number" placeholder={labels.actual === "SPENT" ? "Spent $" : labels.actual === "SAVED" ? "Saved $" : "Received $"} value={newBudgetItems[key].actual} onChange={e => setNewBudgetItems(p => ({...p, [key]: {...p[key], actual: e.target.value}}))} className="w-full p-1.5 text-xs rounded-md" style={{background: "white", border: `1px solid ${color}`}}/></td>
                 {showPaid && <td></td>}
                 <td className="p-1.5 text-center"><button onClick={() => addBudgetItem(key)} className="w-full p-1.5 rounded-md font-bold text-white text-xs" style={{background: tc}}>+</button></td>
               </tr>
               {budget[key].length > 0 && (
                 <tr style={{background: `${color}50`}}>
                   <td className="p-2 pl-3 font-extrabold" style={{color: tc, fontFamily: "'Fraunces', serif"}}>TOTAL</td>
-                  <td className="p-2 font-extrabold" style={{color: tc}}>${sumBudget(key, "planned")}</td>
-                  <td className="p-2 font-extrabold" style={{color: tc}}>${sumBudget(key, "actual")}</td>
+                  <td></td>
+                  <td className="p-2 font-extrabold" style={{color: tc}}>{formatMoney(sumNeeded(key))}</td>
+                  <td className="p-2 font-extrabold" style={{color: tc}}>{formatMoney(sumBudget(key, "actual"))}</td>
                   {showPaid && <td></td>}
                   <td></td>
                 </tr>
@@ -1922,16 +1964,53 @@ export default function App() {
     );
     };
 
+    const renderMiniChart = (title, subtitle, data, total) => (
+      <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: "rgba(255,255,255,0.85)"}}>
+        <h3 className="text-sm font-bold mb-1" style={{color: palette.lavenderText, fontFamily: "'Fraunces', serif"}}>{title}</h3>
+        <p className="text-xs mb-4 opacity-60" style={{color: palette.lavenderText}}>{subtitle}</p>
+        {total === 0 ? (
+          <div className="text-center py-7"><div className="text-3xl mb-2">✨</div><p className="text-xs font-medium" style={{color: palette.lavenderText}}>Add amounts to see this chart.</p></div>
+        ) : (
+          <div className="flex items-center gap-5 flex-col sm:flex-row">
+            <div className="shrink-0"><PieChart data={data} size={150}/></div>
+            <div className="flex-grow space-y-2 w-full">
+              {data.map((d, idx) => {
+                const pct = Math.round((d.value / total) * 100);
+                return (
+                  <div key={idx} className="flex items-center gap-2.5">
+                    <div className="w-4 h-4 rounded-md shrink-0 shadow-sm" style={{background: d.color}}></div>
+                    <div className="flex-grow flex justify-between items-center gap-3">
+                      <span className="text-xs font-bold truncate" style={{color: d.tc}}>{d.label}</span>
+                      <span className="text-xs font-extrabold px-2 py-0.5 rounded-full shrink-0" style={{background: d.color, color: "white"}}>{pct}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+
     return (
       <div className="animate-in fade-in duration-500 space-y-5">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-3xl p-4 border-2 border-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.mint}90, ${palette.sky}60)`}}>
-            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: palette.mintText, opacity: 0.7}}>MONEY IN</div>
-            <div className="text-3xl font-extrabold" style={{color: palette.mintText, fontFamily: "'Fraunces', serif"}}>${incomeAvailable}</div>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: palette.mintText, opacity: 0.7}}>PAYCHECK IN</div>
+            <div className="text-3xl font-extrabold" style={{color: palette.mintText, fontFamily: "'Fraunces', serif"}}>{formatMoney(paycheckAmount)}</div>
+            <div className="text-[10px] font-bold opacity-60 truncate" style={{color: palette.mintText}}>{latestPaycheck?.dueDate ? `Pay date ${formatDateLabel(latestPaycheck.dueDate)}` : "Add biweekly income"}</div>
           </div>
           <div className="rounded-3xl p-4 border-2 border-white shadow-md" style={{background: remaining >= 0 ? `linear-gradient(135deg, ${palette.lavender}90, ${palette.sky}60)` : `linear-gradient(135deg, ${palette.pink}90, ${palette.peach}60)`}}>
-            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: remaining >= 0 ? palette.lavenderText : palette.pinkText, opacity: 0.7}}>{remaining >= 0 ? "LEFT AFTER NEEDS" : "OVER NEEDED"}</div>
-            <div className="text-3xl font-extrabold" style={{color: remaining >= 0 ? palette.lavenderText : palette.pinkText, fontFamily: "'Fraunces', serif"}}>${Math.abs(remaining)}</div>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: remaining >= 0 ? palette.lavenderText : palette.pinkText, opacity: 0.7}}>{remaining >= 0 ? "LEFT AFTER PLAN" : "OVER PLAN"}</div>
+            <div className="text-3xl font-extrabold" style={{color: remaining >= 0 ? palette.lavenderText : palette.pinkText, fontFamily: "'Fraunces', serif"}}>{formatMoney(Math.abs(remaining))}</div>
+          </div>
+          <div className="rounded-3xl p-4 border-2 border-white shadow-md" style={{background: `linear-gradient(135deg, ${palette.peach}90, ${palette.cream}70)`}}>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: palette.peachText, opacity: 0.7}}>ACTUAL USED</div>
+            <div className="text-3xl font-extrabold" style={{color: palette.peachText, fontFamily: "'Fraunces', serif"}}>{formatMoney(totalActualOut)}</div>
+          </div>
+          <div className="rounded-3xl p-4 border-2 border-white shadow-md" style={{background: actualLeft >= 0 ? `linear-gradient(135deg, ${palette.sky}90, ${palette.mint}60)` : `linear-gradient(135deg, ${palette.pink}90, ${palette.peach}60)`}}>
+            <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{color: actualLeft >= 0 ? palette.skyText : palette.pinkText, opacity: 0.7}}>ACTUAL LEFT</div>
+            <div className="text-3xl font-extrabold" style={{color: actualLeft >= 0 ? palette.skyText : palette.pinkText, fontFamily: "'Fraunces', serif"}}>{formatMoney(Math.abs(actualLeft))}</div>
           </div>
         </div>
         <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: "rgba(255,255,255,0.85)"}}>
@@ -1955,6 +2034,51 @@ export default function App() {
                   );
                 })}
               </div>
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {renderMiniChart("Actual Money Used", "What you actually spent, paid, or saved.", actualPieData, totalActualOut)}
+          {renderMiniChart("Savings Progress", "How your saved money is split across goals.", savingsPieData, totals.savingActual)}
+        </div>
+        <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${palette.sky}55, white)`}}>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-bold" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}>Savings Goals</h3>
+              <p className="text-xs opacity-65" style={{color: palette.skyText}}>Separate trip, car, emergency, and other goals that still connect to your paycheck.</p>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{color: palette.skyText}}>Saved</div>
+              <div className="text-lg font-extrabold" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}>{formatMoney(totals.savingActual)}</div>
+            </div>
+          </div>
+          {savingsGoals.length === 0 ? (
+            <p className="text-xs py-4 text-center opacity-60" style={{color: palette.skyText}}>Add goals like Trip, New Car, Emergency Fund, or Christmas.</p>
+          ) : (
+            <div className="space-y-3">
+              {savingsGoals.map(goal => {
+                const target = moneyValue(goal.planned);
+                const saved = moneyValue(goal.actual);
+                const pct = target > 0 ? Math.min(100, Math.round((saved / target) * 100)) : 0;
+                return (
+                  <div key={goal.id} className="rounded-2xl p-3 bg-white/80 border" style={{borderColor: palette.sky}}>
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <div className="min-w-0">
+                        <div className="text-xs font-extrabold truncate" style={{color: palette.skyText}}>{goal.category}</div>
+                        <div className="text-[10px] opacity-60" style={{color: palette.skyText}}>{goal.dueDate ? `Save by ${formatDateLabel(goal.dueDate)}` : "No save-by date"}</div>
+                      </div>
+                      <div className="text-xs font-bold shrink-0" style={{color: palette.skyText}}>{formatMoney(saved)} / {formatMoney(target)}</div>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-white shadow-inner overflow-hidden mb-2">
+                      <div className="h-full rounded-full transition-all" style={{width: `${pct}%`, background: `linear-gradient(90deg, ${palette.skyDeep}, ${palette.mintDeep})`}}></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <input type="number" placeholder="Add saved $" value={savingContributions[goal.id] || ""} onChange={e => setSavingContributions(p => ({ ...p, [goal.id]: e.target.value }))} className="flex-grow text-xs p-2 rounded-lg focus:outline-none" style={{background: "white", border: `1px solid ${palette.sky}`}}/>
+                      <button onClick={() => addSavingContribution(goal.id)} className="px-3 rounded-lg text-xs font-bold text-white" style={{background: palette.skyText}}>Add</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -2061,3 +2185,4 @@ export default function App() {
     </div>
   );
 }
+
