@@ -1,11 +1,13 @@
-const MODEL = "claude-sonnet-4-20250514";
+const ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+const GEMINI_MODEL = "gemini-1.5-flash";
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return json(405, { error: "Method not allowed" });
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
   try {
     const { messages, system, maxTokens = 1000 } = JSON.parse(event.body || "{}");
@@ -13,36 +15,75 @@ exports.handler = async (event) => {
       return json(400, { error: "messages and system are required." });
     }
 
-    if (!apiKey) {
-      return json(200, { reply: createPlaceholderReply(messages, system) });
+    if (geminiApiKey) {
+      return await askGemini({ apiKey: geminiApiKey, messages, system, maxTokens });
     }
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: maxTokens,
-        system,
-        messages: messages.slice(-12),
-      }),
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return json(response.status, { error: data.error?.message || "Anthropic request failed." });
+    if (anthropicApiKey) {
+      return await askAnthropic({ apiKey: anthropicApiKey, messages, system, maxTokens });
     }
 
-    const reply = data.content?.map((block) => block.text || "").join("").trim();
-    return json(200, { reply: reply || "I could not think of a response right now." });
+    return json(200, { reply: createPlaceholderReply(messages, system) });
   } catch (error) {
     return json(500, { error: error.message || "AI function failed." });
   }
 };
+
+async function askGemini({ apiKey, messages, system, maxTokens }) {
+  const contents = messages.slice(-12).map((message) => ({
+    role: message.role === "assistant" ? "model" : "user",
+    parts: [{ text: String(message.content || "") }],
+  }));
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents,
+        generationConfig: {
+          maxOutputTokens: maxTokens,
+          temperature: 0.7,
+        },
+      }),
+    }
+  );
+
+  const data = await response.json();
+  if (!response.ok) {
+    return json(response.status, { error: data.error?.message || "Gemini request failed." });
+  }
+
+  const reply = data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+  return json(200, { reply: reply || "I could not think of a response right now." });
+}
+
+async function askAnthropic({ apiKey, messages, system, maxTokens }) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: maxTokens,
+      system,
+      messages: messages.slice(-12),
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    return json(response.status, { error: data.error?.message || "Anthropic request failed." });
+  }
+
+  const reply = data.content?.map((block) => block.text || "").join("").trim();
+  return json(200, { reply: reply || "I could not think of a response right now." });
+}
 
 function json(statusCode, body) {
   return {
@@ -58,6 +99,12 @@ function createPlaceholderReply(messages, system) {
   const lowerMessage = String(lastUserMessage).toLowerCase();
 
   if (lowerSystem.includes("financial") || lowerSystem.includes("budget")) {
+    if (lowerMessage.includes("paycheck") || lowerMessage.includes("biweekly")) {
+      return "Test budget coach: Add each paycheck under Biweekly Paycheck Income with the pay date, expected amount, and actual received. Then assign that money into bills, debt, expenses, and savings so the overview shows what is planned and what actually happened.";
+    }
+    if (lowerMessage.includes("trip") || lowerMessage.includes("car") || lowerMessage.includes("goal")) {
+      return "Test budget coach: Add each savings goal as its own row under Savings Goals, like Trip or New Car. Put the full target under Target, then use Add saved whenever you move money into that goal.";
+    }
     if (lowerMessage.includes("debt")) {
       return "Test budget coach: For debt, start by listing the balance, minimum payment, and interest for each one. A good next step is choosing one target debt and adding the exact amount you can pay this week.";
     }
