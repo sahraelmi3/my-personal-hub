@@ -11,7 +11,7 @@ import {
 // ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCX1vJYGoSdnOOJkqrXINowYRw_au3SijY",
+  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
   authDomain: "my-personal-hub-debb3.firebaseapp.com",
   projectId: "my-personal-hub-debb3",
   storageBucket: "my-personal-hub-debb3.firebasestorage.app",
@@ -273,8 +273,11 @@ Format:
 {"type": "add_note", "data": {"title": "...", ...}}
 \`\`\`
 For appointments or dated events, include BOTH add_calendar and add_schedule with the same date. For multiple actions, include multiple action blocks. Do not use \`\`\`json for app actions. Keep the visible response 1-2 friendly sentences and never describe the hidden JSON.`;
-const LISTENING_SYSTEM = `You are an AI sales coach listening live. Script flow: Intro → Qualify → Needs → Commit → Value of Visit → Close → Button-Up.
-Respond ONLY in JSON: {"status": "on_track" | "off_track" | "objection" | "buying_signal", "stage": "intro|qualify|needs|transition|vov|close|buttonup|unknown", "tip": "ONE specific sentence to say next", "alert": "brief alert if needed"}
+const LISTENING_SYSTEM = `You are an AI call coach listening live to both the rep and customer when the microphone can hear them.
+Use the user's current inbound/outbound script provided in the message, not a generic script.
+If the rep is on script, give the next useful line. If they drift off script, give one short bridge back to the next script line.
+If the customer objects, over-explains, rambles, or gives too much detail, give one polite sentence that validates them and redirects back to the script.
+Respond ONLY in JSON: {"status": "on_track" | "off_track" | "objection" | "buying_signal" | "overexplaining", "stage": "intro|qualify|needs|transition|vov|close|buttonup|unknown", "tip": "ONE specific sentence to say next", "alert": "brief alert if needed"}
 Keep tips under 20 words.`;
 const SEGUE_SYSTEM = `Customer just said something unexpected. Give 2-3 short bring-back lines (each under 20 words) that 1) validate the customer 2) transition back to script. Be specific.`;
 
@@ -749,6 +752,26 @@ export default function App() {
   const currentScript = scriptType === "inbound" ? inboundScript : outboundScript;
   const setCurrentScript = scriptType === "inbound" ? setInboundScript : setOutboundScript;
 
+  const buildListeningScriptContext = () => {
+    const activeSection = currentScript.find(section => section.id === activeScriptSection) || currentScript[0];
+    const activeIndex = Math.max(0, currentScript.findIndex(section => section.id === activeSection?.id));
+    const sections = currentScript.map((section, sectionIndex) => {
+      const lines = (section.lines || []).map((line, lineIndex) => {
+        if (line.type === "branch") return `${lineIndex + 1}. If customer says: ${line.customerSays || ""} | Rep says: ${line.response || ""}`;
+        const speaker = line.type === "customer" ? "Customer" : line.type === "tip" ? "Coach tip" : line.type === "header" ? "Header" : "Rep";
+        return `${lineIndex + 1}. ${speaker}: ${line.text || ""}`;
+      }).join("\n");
+      return `${sectionIndex + 1}. ${section.label}${section.id === activeSection?.id ? " (current)" : ""}\n${lines || "No lines yet."}`;
+    }).join("\n\n");
+    const nextSection = currentScript[activeIndex + 1];
+    return `Call type: ${scriptType.toUpperCase()}
+Current section: ${activeSection?.label || "Unknown"}
+Next section: ${nextSection?.label || "End of script"}
+
+Current script:
+${sections}`;
+  };
+
   // ─── LOAD USER DATA on login ────────────────────
   useEffect(() => {
     if (!user) return;
@@ -879,8 +902,9 @@ export default function App() {
       lastAnalysisRef.current = now;
       setCoachingLoading(true);
       try {
+        const scriptContext = buildListeningScriptContext();
         const reply = await askClaude(
-          [{ role: "user", content: `Latest call snippet: "${snippet.trim()}"\n\nRespond ONLY with the JSON.` }],
+          [{ role: "user", content: `${scriptContext}\n\nLatest transcript snippet from rep/customer audio: "${snippet.trim()}"\n\nDecide if they are on script, off script, facing an objection, or hearing a buying signal. If the customer is rambling, give a short redirect sentence back to the next script line. Respond ONLY with the JSON.` }],
           LISTENING_SYSTEM, 400
         );
         const jsonMatch = reply.match(/\{[\s\S]*\}/);
@@ -892,7 +916,7 @@ export default function App() {
       setCoachingLoading(false);
     }, 4000);
     return () => clearInterval(interval);
-  }, [isListening]);
+  }, [isListening, scriptType, activeScriptSection, inboundScript, outboundScript]);
 
   const toggleListening = async () => {
     if (!recognitionRef.current) return;
@@ -902,7 +926,7 @@ export default function App() {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         recognitionRef.current.start();
         setIsListening(true); setTranscript(""); transcriptBufferRef.current = "";
-        setLiveCoaching([{ id: Date.now(), status: "on_track", stage: "intro", tip: "I'm listening! 🎤 Start your call naturally.", time: new Date().toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) }]);
+        setLiveCoaching([{ id: Date.now(), status: "on_track", stage: "intro", tip: `${scriptType === "inbound" ? "Inbound" : "Outbound"} mode is on. Start naturally.`, time: new Date().toLocaleTimeString("en-US", {hour: "numeric", minute: "2-digit"}) }]);
       } catch (err) { setVoiceSupported(false); }
     }
   };
@@ -1046,7 +1070,7 @@ export default function App() {
   const parseAIActionResponse = (reply) => {
     const actions = [];
     let cleanReply = reply || "";
-    const blockRegex = /```(?:action|json)\s*([\s\S]*?)```/gi;
+    const blockRegex = /```\s*(?:action|json)?\s*([\s\S]*?)```/gi;
     let match;
     while ((match = blockRegex.exec(reply || "")) !== null) {
       const parsedActions = parseActionPayload(match[1]);
@@ -1747,6 +1771,17 @@ export default function App() {
             <button onClick={() => setVoiceMode(false)} className="p-2 rounded-full hover:bg-white/40" style={{color: palette.lavenderText}}><X className="w-5 h-5"/></button>
           </div>
           {!voiceSupported && <div className="text-xs p-3 rounded-xl mb-2 bg-white/80" style={{color: palette.pinkText}}>⚠️ Works best in Safari on iPhone with mic permissions allowed!</div>}
+          <div className="mb-3 p-1.5 rounded-2xl bg-white/60 grid grid-cols-2 gap-1.5">
+            <button onClick={() => { setScriptType("inbound"); setActiveScriptSection(inboundScript[0]?.id || "intro"); }} className="py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5" style={scriptType === "inbound" ? {background: palette.mint, color: palette.mintText, boxShadow: "0 2px 8px rgba(0,0,0,0.08)"} : {color: palette.lavenderText}}>
+              <PhoneIncoming className="w-3.5 h-3.5"/>Inbound
+            </button>
+            <button onClick={() => { setScriptType("outbound"); setActiveScriptSection(outboundScript[0]?.id || "placeholder"); }} className="py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5" style={scriptType === "outbound" ? {background: palette.peach, color: palette.peachText, boxShadow: "0 2px 8px rgba(0,0,0,0.08)"} : {color: palette.lavenderText}}>
+              <PhoneOutgoing className="w-3.5 h-3.5"/>Outbound
+            </button>
+          </div>
+          <div className="mb-3 rounded-xl bg-white/60 p-2.5 text-xs" style={{color: palette.lavenderText}}>
+            Following: <span className="font-bold">{currentScript.find(s => s.id === activeScriptSection)?.label || currentScript[0]?.label || "No script"}</span>
+          </div>
           <button onClick={toggleListening} disabled={!voiceSupported} className="w-full py-3 rounded-2xl font-bold text-white shadow-md flex items-center justify-center gap-2 disabled:opacity-50" style={{background: isListening ? `linear-gradient(135deg, ${palette.pinkDeep}, ${palette.peachDeep})` : `linear-gradient(135deg, ${palette.lavenderText}, ${palette.pinkText})`}}>
             {isListening ? <><MicOff className="w-4 h-4"/>Stop Listening</> : <><Mic className="w-4 h-4"/>Start Listening</>}
           </button>
@@ -1770,6 +1805,7 @@ export default function App() {
               off_track: { color: palette.peach, tc: palette.peachText, icon: "⚠️", label: "Off Track" },
               objection: { color: palette.pink, tc: palette.pinkText, icon: "🛡️", label: "Objection" },
               buying_signal: { color: palette.cream, tc: palette.creamText, icon: "💎", label: "Buying Signal" },
+              overexplaining: { color: palette.sky, tc: palette.skyText, icon: "💬", label: "Too Much Detail" },
             };
             const cfg = statusConfig[tip.status] || statusConfig.on_track;
             return (
@@ -2268,6 +2304,21 @@ export default function App() {
       return legacyKey === dateKey;
     };
     const selectedDayEvents = calendarEvents.filter(event => eventMatchesDate(event, selectedCalendarDate));
+    const weekStart = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate());
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const upcomingWeekEvents = calendarEvents
+      .map(event => {
+        const dateKey = getEventDateKey(event, currentTime);
+        const date = dateKey ? new Date(`${dateKey}T00:00:00`) : null;
+        return { ...event, dateKey, date };
+      })
+      .filter(event => event.date && event.date >= weekStart && event.date <= weekEnd)
+      .sort((a, b) => {
+        const dateDiff = a.date - b.date;
+        if (dateDiff !== 0) return dateDiff;
+        return timeToMinutes(a.time || "All day") - timeToMinutes(b.time || "All day");
+      });
     return (
       <div className="animate-in fade-in duration-500 space-y-5">
         <div className="flex items-center justify-between gap-3">
@@ -2329,6 +2380,35 @@ export default function App() {
             <p className="text-xs font-bold" style={{color: palette.skyText}}>No events for this day yet.</p>
           </div>
         )}
+        <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${palette.cream}55, white)`}}>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-sm font-bold" style={{color: palette.creamText, fontFamily: "'Fraunces', serif"}}>Upcoming This Week</h4>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{background: palette.cream, color: palette.creamText}}>7 days</span>
+          </div>
+          {upcomingWeekEvents.length > 0 ? (
+            <div className="space-y-2">
+              {upcomingWeekEvents.map(event => (
+                <button key={`week-${event.id}`} onClick={() => {
+                  setCalendarViewDate(new Date(event.date.getFullYear(), event.date.getMonth(), 1));
+                  setSelectedCalendarDate(event.dateKey);
+                  setSelectedPlanDate(event.date.getDate());
+                  setNewCalEvent(p => ({ ...p, fullDate: event.dateKey, date: String(event.date.getDate()) }));
+                }} className="w-full rounded-2xl p-3 flex items-center gap-3 text-left bg-white/80 border" style={{borderColor: palette.cream}}>
+                  <div className="w-12 h-12 rounded-xl flex flex-col items-center justify-center shadow-sm" style={{background: event.color || palette.cream}}>
+                    <span className="text-[10px] font-bold uppercase" style={{color: "#5C5470"}}>{event.date.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                    <span className="text-sm font-extrabold" style={{color: "#5C5470"}}>{event.date.getDate()}</span>
+                  </div>
+                  <div className="flex-grow min-w-0">
+                    <div className="text-xs font-extrabold truncate" style={{color: palette.creamText}}>{event.title}</div>
+                    <div className="text-[10px] opacity-70 capitalize" style={{color: palette.creamText}}>{event.time ? `${event.time} · ` : ""}{event.type}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-center py-3 opacity-65" style={{color: palette.creamText}}>No events coming up in the next 7 days.</p>
+          )}
+        </div>
         <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${palette.sky}80, ${palette.mint}60)`}}>
           <h4 className="font-bold mb-3 flex items-center text-sm" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}><Plus className="w-4 h-4 mr-1.5"/>Add Event</h4>
           <div className="flex flex-col gap-2">
@@ -2775,5 +2855,3 @@ export default function App() {
     </div>
   );
 }
-
-
