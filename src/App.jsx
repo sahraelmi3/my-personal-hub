@@ -11,7 +11,7 @@ import {
 // ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
+  apiKey: "AIzaSyCX1vJYGoSdnOOJkqrXINowYRw_au3SijY",
   authDomain: "my-personal-hub-debb3.firebaseapp.com",
   projectId: "my-personal-hub-debb3",
   storageBucket: "my-personal-hub-debb3.firebasestorage.app",
