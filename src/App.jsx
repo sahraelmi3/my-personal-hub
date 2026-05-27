@@ -11,7 +11,7 @@ import {
 // ─── FIREBASE CONFIG (paste your config here once you set up Firebase) ────
 // Get this from https://console.firebase.google.com → Project Settings → General → Your apps
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCX1vJYGoSdnOOJkqrXINowYRw_au3SijY",
+  apiKey: "AIzaSyCXivJYGoSdnOOJkqzXINowYRw_auSSijY",
   authDomain: "my-personal-hub-debb3.firebaseapp.com",
   projectId: "my-personal-hub-debb3",
   storageBucket: "my-personal-hub-debb3.firebasestorage.app",
@@ -360,6 +360,17 @@ const formatDateLabel = (dateString) => {
   return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 const dateSortValue = (dateString) => dateString ? new Date(`${dateString}T00:00:00`).getTime() : Number.MAX_SAFE_INTEGER;
+const makeDateKey = (year, monthIndex, day) => `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+const getEventDateKey = (event, fallbackDate = new Date()) => {
+  if (event?.fullDate) return event.fullDate;
+  const day = parseInt(event?.date, 10);
+  if (!day) return "";
+  return makeDateKey(fallbackDate.getFullYear(), fallbackDate.getMonth(), day);
+};
+const getEventDay = (event) => {
+  if (event?.fullDate) return new Date(`${event.fullDate}T00:00:00`).getDate();
+  return parseInt(event?.date, 10);
+};
 
 const defaultBudget = {
   income: [],
@@ -570,10 +581,15 @@ export default function App() {
   const [medsList, setMedsList] = useState([]);
   const [scheduleItems, setScheduleItems] = useState([]);
   const [selectedPlanDate, setSelectedPlanDate] = useState(new Date().getDate());
+  const [calendarViewDate, setCalendarViewDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(getLocalDateKey());
   const [isEditingSchedule, setIsEditingSchedule] = useState(false);
   const [newScheduleItem, setNewScheduleItem] = useState({ time: "", event: "", type: "work" });
   const [calendarEvents, setCalendarEvents] = useState([]);
-  const [newCalEvent, setNewCalEvent] = useState({ date: "", title: "", type: "social" });
+  const [newCalEvent, setNewCalEvent] = useState({ date: String(new Date().getDate()), fullDate: getLocalDateKey(), time: "", title: "", type: "social" });
   const [budget, setBudget] = useState(defaultBudget);
   const [newBudgetItems, setNewBudgetItems] = useState({
     income: { category: "", planned: "", actual: "", dueDate: "" },
@@ -1030,7 +1046,7 @@ export default function App() {
   const parseAIActionResponse = (reply) => {
     const actions = [];
     let cleanReply = reply || "";
-    const blockRegex = /```\s*(?:action|json)?\s*([\s\S]*?)```/gi;
+    const blockRegex = /```(?:action|json)\s*([\s\S]*?)```/gi;
     let match;
     while ((match = blockRegex.exec(reply || "")) !== null) {
       const parsedActions = parseActionPayload(match[1]);
@@ -1081,8 +1097,9 @@ export default function App() {
         if (action.data.type === "social") color = palette.lavender;
         if (action.data.type === "appointment") color = palette.pink;
         const date = String(action.data.date || "").replace(/\D/g, "");
-        setCalendarEvents(p => [...p, { id: Date.now(), date, title: action.data.title, type: action.data.type, color }]);
-        actionMsg = `🗓️ Added "${action.data.title}" on May ${action.data.date}`;
+        const fullDate = action.data.fullDate || (date ? makeDateKey(calendarViewDate.getFullYear(), calendarViewDate.getMonth(), date) : "");
+        setCalendarEvents(p => [...p, { id: Date.now(), date, fullDate, time: action.data.time || "", title: action.data.title, type: action.data.type, color }]);
+        actionMsg = `🗓️ Added "${action.data.title}"${fullDate ? ` on ${formatDateLabel(fullDate)}` : ""}`;
         break;
       }
       case "log_call": {
@@ -1607,13 +1624,14 @@ export default function App() {
     const selectedDateObj = new Date(currentTime.getFullYear(), currentTime.getMonth(), selectedPlanDate);
     const selectedDateLabel = selectedDateObj.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
     const selectedDateString = String(selectedPlanDate);
+    const selectedTimelineKey = makeDateKey(currentTime.getFullYear(), currentTime.getMonth(), selectedPlanDate);
     const scheduleForSelectedDay = scheduleItems.filter(item => !item.date || String(parseInt(item.date)) === selectedDateString);
     const calendarForSelectedDay = calendarEvents
-      .filter(ev => String(parseInt(ev.date)) === selectedDateString)
+      .filter(ev => getEventDateKey(ev, currentTime) === selectedTimelineKey)
       .filter(ev => !scheduleForSelectedDay.some(item => String(item.event || "").toLowerCase() === String(ev.title || "").toLowerCase()));
     const sortedScheduleItems = sortScheduleItems([
       ...scheduleForSelectedDay,
-      ...calendarForSelectedDay.map(ev => ({ id: `cal-${ev.id}`, date: ev.date, time: "All day", event: ev.title, type: ev.type || "routine", fromCalendar: true })),
+      ...calendarForSelectedDay.map(ev => ({ id: `cal-${ev.id}`, date: ev.date, time: ev.time || "All day", event: ev.title, type: ev.type || "routine", fromCalendar: true })),
     ]);
     const dotColor = (type) => {
       if (type === "break") return palette.cream;
@@ -2220,14 +2238,53 @@ export default function App() {
   };
 
   const renderCalendar = () => {
-    const monthName = currentTime.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    const firstDay = new Date(currentTime.getFullYear(), currentTime.getMonth(), 1).getDay();
-    const daysInMonth = new Date(currentTime.getFullYear(), currentTime.getMonth() + 1, 0).getDate();
+    const viewYear = calendarViewDate.getFullYear();
+    const viewMonth = calendarViewDate.getMonth();
+    const monthName = calendarViewDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
     const blanks = Array(firstDay).fill(null);
     const days = Array.from({length: daysInMonth}, (_, i) => i + 1);
+    const todayKey = getLocalDateKey(currentTime);
+    const selectedDateObj = new Date(`${selectedCalendarDate}T00:00:00`);
+    const selectedDateLabel = selectedDateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+    const changeCalendarMonth = (amount) => {
+      const next = new Date(viewYear, viewMonth + amount, 1);
+      const nextKey = makeDateKey(next.getFullYear(), next.getMonth(), 1);
+      setCalendarViewDate(next);
+      setSelectedCalendarDate(nextKey);
+      setSelectedPlanDate(1);
+      setNewCalEvent(p => ({ ...p, fullDate: nextKey, date: "1" }));
+    };
+    const selectCalendarDay = (day) => {
+      const key = makeDateKey(viewYear, viewMonth, day);
+      setSelectedCalendarDate(key);
+      setSelectedPlanDate(day);
+      setNewCalEvent(p => ({ ...p, fullDate: key, date: String(day) }));
+    };
+    const eventMatchesDate = (event, dateKey) => {
+      if (event.fullDate) return event.fullDate === dateKey;
+      const legacyKey = makeDateKey(currentTime.getFullYear(), currentTime.getMonth(), parseInt(event.date, 10));
+      return legacyKey === dateKey;
+    };
+    const selectedDayEvents = calendarEvents.filter(event => eventMatchesDate(event, selectedCalendarDate));
     return (
       <div className="animate-in fade-in duration-500 space-y-5">
-        <h3 className="text-base font-bold flex items-center" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}><CalendarDays className="w-4 h-4 mr-2"/>{monthName}</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-bold flex items-center" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}><CalendarDays className="w-4 h-4 mr-2"/>{monthName}</h3>
+          <div className="flex gap-2">
+            <button onClick={() => changeCalendarMonth(-1)} className="p-2 rounded-xl bg-white/80 shadow-sm" style={{color: palette.skyText}}><ArrowLeft className="w-4 h-4"/></button>
+            <button onClick={() => {
+              const now = new Date();
+              const key = getLocalDateKey(now);
+              setCalendarViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
+              setSelectedCalendarDate(key);
+              setSelectedPlanDate(now.getDate());
+              setNewCalEvent(p => ({ ...p, fullDate: key, date: String(now.getDate()) }));
+            }} className="px-3 py-2 rounded-xl text-xs font-bold bg-white/80 shadow-sm" style={{color: palette.skyText}}>Today</button>
+            <button onClick={() => changeCalendarMonth(1)} className="p-2 rounded-xl bg-white/80 shadow-sm" style={{color: palette.skyText}}><ArrowRight className="w-4 h-4"/></button>
+          </div>
+        </div>
         <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: "rgba(255,255,255,0.7)"}}>
           <div className="grid grid-cols-7 gap-1 text-center mb-2">
             {["Su","Mo","Tu","We","Th","Fr","Sa"].map((d) => <div key={d} className="text-[10px] uppercase font-bold tracking-wider opacity-60" style={{color: palette.lavenderText}}>{d}</div>)}
@@ -2235,11 +2292,12 @@ export default function App() {
           <div className="grid grid-cols-7 gap-1.5">
             {[...blanks, ...days].map((day, idx) => {
               if (!day) return <div key={`b-${idx}`} className="h-14"></div>;
-              const dayEvents = calendarEvents.filter(ev => parseInt(ev.date) === day);
-              const isToday = day === currentTime.getDate();
-              const isSelected = day === selectedPlanDate;
+              const dateKey = makeDateKey(viewYear, viewMonth, day);
+              const dayEvents = calendarEvents.filter(ev => eventMatchesDate(ev, dateKey));
+              const isToday = dateKey === todayKey;
+              const isSelected = dateKey === selectedCalendarDate;
               return (
-                <button key={`d-${day}`} onClick={() => { setSelectedPlanDate(day); setActiveTab("timeline"); }} className="h-14 rounded-2xl flex flex-col items-center justify-start py-1.5 border-2" style={isSelected ? {background: `linear-gradient(135deg, ${palette.peach}, ${palette.pink})`, borderColor: palette.peachDeep} : isToday ? {background: `linear-gradient(135deg, ${palette.sky}, ${palette.lavender})`, borderColor: palette.skyDeep} : dayEvents.length > 0 ? {background: dayEvents[0].color, borderColor: "white", opacity: 0.7} : {background: "white", borderColor: "rgba(255,255,255,0.5)"}}>
+                <button key={`d-${day}`} onClick={() => selectCalendarDay(day)} className="h-14 rounded-2xl flex flex-col items-center justify-start py-1.5 border-2" style={isSelected ? {background: `linear-gradient(135deg, ${palette.peach}, ${palette.pink})`, borderColor: palette.peachDeep} : isToday ? {background: `linear-gradient(135deg, ${palette.sky}, ${palette.lavender})`, borderColor: palette.skyDeep} : dayEvents.length > 0 ? {background: dayEvents[0].color, borderColor: "white", opacity: 0.7} : {background: "white", borderColor: "rgba(255,255,255,0.5)"}}>
                   <span className="text-xs font-bold" style={{color: isSelected ? palette.peachText : isToday ? palette.skyText : "#5C5470"}}>{day}</span>
                   <div className="flex gap-0.5 mt-0.5 flex-wrap justify-center px-1">{dayEvents.map(ev => <div key={ev.id} className="w-1.5 h-1.5 rounded-full bg-white"></div>)}</div>
                 </button>
@@ -2247,40 +2305,65 @@ export default function App() {
             })}
           </div>
         </div>
-        {calendarEvents.length > 0 && (
+        <div className="flex items-center justify-between">
+          <h4 className="text-sm font-bold" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}>{selectedDateLabel}</h4>
+          <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{background: palette.sky, color: palette.skyText}}>{selectedDayEvents.length} events</span>
+        </div>
+        {selectedDayEvents.length > 0 ? (
           <div className="space-y-2">
-            {calendarEvents.map(ev => (
-              <div key={ev.id} onClick={() => { setSelectedPlanDate(parseInt(ev.date)); setActiveTab("timeline"); }} className="rounded-2xl p-3 flex items-center gap-3 shadow-sm border-2 border-white cursor-pointer" style={{background: `${ev.color}80`}}>
+            {selectedDayEvents.map(ev => (
+              <div key={ev.id} className="rounded-2xl p-3 flex items-center gap-3 shadow-sm border-2 border-white" style={{background: `${ev.color}80`}}>
                 <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center shadow-sm" style={{background: "white"}}>
-                  <span className="text-sm font-bold" style={{color: "#5C5470"}}>{ev.date}</span>
+                  <span className="text-sm font-bold" style={{color: "#5C5470"}}>{getEventDay(ev)}</span>
                 </div>
                 <div className="flex-grow">
                   <div className="text-sm font-bold" style={{color: "#5C5470", fontFamily: "'Fraunces', serif"}}>{ev.title}</div>
-                  <div className="text-xs opacity-60 capitalize" style={{color: "#5C5470"}}>{ev.type}</div>
+                  <div className="text-xs opacity-60 capitalize" style={{color: "#5C5470"}}>{ev.time ? `${ev.time} · ` : ""}{ev.type}</div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); deleteCalendarEvent(ev.id); }} className="p-2 rounded-full" style={{color: palette.pinkText}}><Trash2 className="w-3.5 h-3.5"/></button>
               </div>
             ))}
+          </div>
+        ) : (
+          <div className="rounded-3xl p-5 text-center border-2 border-white" style={{background: "rgba(255,255,255,0.65)"}}>
+            <p className="text-xs font-bold" style={{color: palette.skyText}}>No events for this day yet.</p>
           </div>
         )}
         <div className="rounded-3xl p-5 shadow-md border-2 border-white" style={{background: `linear-gradient(135deg, ${palette.sky}80, ${palette.mint}60)`}}>
           <h4 className="font-bold mb-3 flex items-center text-sm" style={{color: palette.skyText, fontFamily: "'Fraunces', serif"}}><Plus className="w-4 h-4 mr-1.5"/>Add Event</h4>
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
-              <input type="number" placeholder="Day" value={newCalEvent.date} onChange={e => setNewCalEvent({...newCalEvent, date: e.target.value})} className="w-20 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}/>
+              <input type="date" value={newCalEvent.fullDate || selectedCalendarDate} onChange={e => {
+                const value = e.target.value;
+                const picked = value ? new Date(`${value}T00:00:00`) : null;
+                setNewCalEvent({...newCalEvent, fullDate: value, date: picked ? String(picked.getDate()) : ""});
+                if (picked) {
+                  setCalendarViewDate(new Date(picked.getFullYear(), picked.getMonth(), 1));
+                  setSelectedCalendarDate(value);
+                  setSelectedPlanDate(picked.getDate());
+                }
+              }} className="flex-1 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}/>
               <select value={newCalEvent.type} onChange={e => setNewCalEvent({...newCalEvent, type: e.target.value})} className="flex-1 text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}>
                 <option value="social">Social 💜</option><option value="appointment">Appt 🩷</option><option value="work">Work 🌿</option>
               </select>
             </div>
+            <select value={newCalEvent.time || ""} onChange={e => setNewCalEvent({...newCalEvent, time: e.target.value})} className="w-full text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}>
+              <option value="">No specific time</option>
+              {TIME_OPTIONS.map(time => <option key={time} value={time}>{time}</option>)}
+            </select>
             <input type="text" placeholder="Event title..." value={newCalEvent.title} onChange={e => setNewCalEvent({...newCalEvent, title: e.target.value})} className="w-full text-sm p-2.5 rounded-xl focus:outline-none" style={{background: "white", border: `1.5px solid ${palette.sky}`}}/>
             <button onClick={() => {
-              if (newCalEvent.date && newCalEvent.title) {
+              if ((newCalEvent.fullDate || newCalEvent.date) && newCalEvent.title) {
                 let color = palette.mint;
                 if (newCalEvent.type === "social") color = palette.lavender;
                 if (newCalEvent.type === "appointment") color = palette.pink;
-                setCalendarEvents([...calendarEvents, {...newCalEvent, id: Date.now(), color}]);
-                setSelectedPlanDate(parseInt(newCalEvent.date));
-                setNewCalEvent({date: "", title: "", type: "social"});
+                const fullDate = newCalEvent.fullDate || selectedCalendarDate;
+                const picked = new Date(`${fullDate}T00:00:00`);
+                const date = String(picked.getDate() || newCalEvent.date);
+                setCalendarEvents([...calendarEvents, {...newCalEvent, date, fullDate, id: Date.now(), color}]);
+                setSelectedCalendarDate(fullDate);
+                setSelectedPlanDate(parseInt(date));
+                setNewCalEvent({date, fullDate, time: "", title: "", type: "social"});
                 rewardStars(3);
               }
             }} className="w-full text-white font-bold py-3 rounded-xl text-sm shadow-md" style={{background: `linear-gradient(135deg, ${palette.skyText}, ${palette.mintText})`}}>Save ✨</button>
