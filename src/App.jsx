@@ -1030,7 +1030,7 @@ export default function App() {
   const parseAIActionResponse = (reply) => {
     const actions = [];
     let cleanReply = reply || "";
-    const blockRegex = /```(?:action|json)\s*([\s\S]*?)```/gi;
+    const blockRegex = /```\s*(?:action|json)?\s*([\s\S]*?)```/gi;
     let match;
     while ((match = blockRegex.exec(reply || "")) !== null) {
       const parsedActions = parseActionPayload(match[1]);
